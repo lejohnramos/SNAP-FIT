@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { Boxes, Loader2 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import { REMEMBER_ME_KEY } from '../lib/supabase'
 
 /**
  * Login page: authenticates an existing user with Supabase email +
@@ -12,6 +13,7 @@ export default function Login() {
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [rememberMe, setRememberMe] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -22,6 +24,10 @@ export default function Login() {
     event.preventDefault()
     setError(null)
     setSubmitting(true)
+    // Write the persistence preference before sign-in so the Supabase
+    // storage adapter routes the session to the correct browser storage:
+    // localStorage when remembered, sessionStorage (tab-only) when not.
+    window.localStorage.setItem(REMEMBER_ME_KEY, rememberMe ? '1' : '0')
     const { error: authError } = await signIn(email.trim(), password)
     setSubmitting(false)
     if (authError) {
@@ -92,6 +98,22 @@ export default function Login() {
               placeholder="••••••••"
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
+          </div>
+          {/* Remember Me */}
+          <div className="flex items-center">
+            <input
+              id="rememberMe"
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 accent-indigo-600"
+            />
+            <label
+              htmlFor="rememberMe"
+              className="ml-2 select-none text-sm text-slate-700"
+            >
+              Remember Me
+            </label>
           </div>
           <button
             type="submit"
