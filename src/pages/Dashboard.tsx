@@ -1,63 +1,42 @@
-import { AlertTriangle, Clock, DollarSign } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { AlertTriangle, Clock, DollarSign, Loader2, RefreshCw } from 'lucide-react'
+import { supabase } from '../lib/supabase'
 
-/** Summary card data — mock values, to be replaced with Supabase queries later. */
-const summaryCards = [
-  {
-    title: 'Total Sales',
-    value: '₱48,250.00',
-    subtitle: '+12.5% vs last month',
-    icon: DollarSign,
-    accent: 'bg-emerald-500',
-  },
-  {
-    title: 'Low Stock Alerts',
-    value: '7',
-    subtitle: '4 collectibles below reorder point',
-    icon: AlertTriangle,
-    accent: 'bg-amber-500',
-  },
-  {
-    title: 'Pending Orders',
-    value: '14',
-    subtitle: '6 awaiting payment confirmation',
-    icon: Clock,
-    accent: 'bg-blue-500',
-  },
-]
-
-/** Supported sales platforms. */
-type Platform = 'Shopee' | 'Lazada' | 'FB'
-
-/** Order lifecycle statuses. */
-type OrderStatus = 'Completed' | 'Shipped' | 'Pending' | 'Cancelled'
-
-/** Shape of a recent order row (mirrors the `orders` table). */
-interface RecentOrder {
+/** Shape of a row from the Supabase `orders` table. */
+interface OrderRow {
   id: string
-  platform: Platform
-  status: OrderStatus
-  total: number
+  platform: string
+  status: string
+  total_amount: number
+  created_at: string
 }
 
-/** Mock recent orders — will come from the `orders` table later. */
-const recentOrders: RecentOrder[] = [
-  { id: 'ORD-1042', platform: 'Shopee', status: 'Completed', total: 1250.0 },
-  { id: 'ORD-1041', platform: 'Lazada', status: 'Shipped', total: 890.0 },
-  { id: 'ORD-1040', platform: 'FB', status: 'Pending', total: 2100.0 },
-  { id: 'ORD-1039', platform: 'Shopee', status: 'Completed', total: 450.0 },
-  { id: 'ORD-1038', platform: 'Lazada', status: 'Cancelled', total: 3200.0 },
-]
+/** Minimal product shape used for the low-stock metric. */
+interface ProductStock {
+  id: string
+  stock_level: number
+  reorder_point: number
+}
 
-/** Tailwind badge classes per order status. */
-const statusStyles: Record<OrderStatus, string> = {
+/** Summary card descriptor. */
+interface SummaryCard {
+  title: string
+  value: string
+  subtitle: string
+  icon: typeof DollarSign
+  accent: string
+}
+
+/** Tailwind badge classes per order status (with fallback). */
+const statusStyles: Record<string, string> = {
   Completed: 'bg-emerald-100 text-emerald-700',
   Shipped: 'bg-blue-100 text-blue-700',
   Pending: 'bg-amber-100 text-amber-700',
   Cancelled: 'bg-red-100 text-red-700',
 }
 
-/** Tailwind badge classes per platform. */
-const platformStyles: Record<Platform, string> = {
+/** Tailwind badge classes per platform (with fallback). */
+const platformStyles: Record<string, string> = {
   Shopee: 'bg-orange-100 text-orange-700',
   Lazada: 'bg-sky-100 text-sky-700',
   FB: 'bg-indigo-100 text-indigo-700',
@@ -71,19 +50,110 @@ function formatPeso(amount: number): string {
   })}`
 }
 
+/** Format an ISO timestamp as a short local date. */
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-PH', {
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
 /**
- * Dashboard page: high-level KPI summary cards and a recent orders table.
+ * Dashboard page: KPI summary cards and a recent orders table, all
+ * backed by real data from the Supabase `orders` and `products` tables.
  */
 export default function Dashboard() {
+  const [orders, setOrders] = useState<OrderRow[]>([])
+  const [products, setProducts] = useState<ProductStock[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  /** Fetch orders (recent first) and product stock levels from Supabase. */
+  const fetchData = async () => {
+    setLoading(true)
+    setError(null)
+    // Limit keeps the payload sane; raised later when orders grow.
+    const [ordersRes, productsRes] = await Promise.all([
+      supabase
+        .from('orders')
+        .select('id, platform, status, total_amount, created_at')
+        .order('created_at', { ascending: false })
+        .limit(1000),
+      supabase.from('products').select('id, stock_level, reorder_point'),
+    ])
+    if (ordersRes.error || productsRes.error) {
+      setError(ordersRes.error?.message ?? productsRes.error?.message ?? null)
+    } else {
+      setOrders((ordersRes.data as OrderRow[]) ?? [])
+      setProducts((productsRes.data as ProductStock[]) ?? [])
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    void fetchData()
+  }, [])
+
+  // Derived metrics, computed from the fetched rows.
+  const totalSales = orders
+    .filter((o) => o.status === 'Completed')
+    .reduce((sum, o) => sum + (o.total_amount ?? 0), 0)
+  const pendingOrders = orders.filter((o) => o.status === 'Pending').length
+  const lowStock = products.filter(
+    (p) => p.stock_level <= p.reorder_point,
+  ).length
+  const recentOrders = orders.slice(0, 5)
+
+  const summaryCards: SummaryCard[] = [
+    {
+      title: 'Total Sales',
+      value: formatPeso(totalSales),
+      subtitle: 'Completed orders',
+      icon: DollarSign,
+      accent: 'bg-emerald-500',
+    },
+    {
+      title: 'Low Stock Alerts',
+      value: String(lowStock),
+      subtitle: 'Collectibles at/below reorder point',
+      icon: AlertTriangle,
+      accent: 'bg-amber-500',
+    },
+    {
+      title: 'Pending Orders',
+      value: String(pendingOrders),
+      subtitle: 'Awaiting payment confirmation',
+      icon: Clock,
+      accent: 'bg-blue-500',
+    },
+  ]
+
   return (
     <div>
       {/* Page header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Overview of sales, stock health, and pending orders.
-        </p>
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Overview of sales, stock health, and pending orders.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void fetchData()}
+          className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
       </div>
+
+      {/* Error banner */}
+      {error && (
+        <div className="mb-6 rounded-xl bg-red-50 px-6 py-4 text-sm text-red-700">
+          Failed to load dashboard data: {error}
+        </div>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -124,36 +194,60 @@ export default function Dashboard() {
                 <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Status
                 </th>
+                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Date
+                </th>
                 <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Total
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {recentOrders.map((order) => (
-                <tr key={order.id} className="hover:bg-slate-50">
-                  <td className="px-6 py-4 text-sm font-medium text-slate-900">
-                    {order.id}
-                  </td>
-                  <td className="px-6 py-4">
-                    <span
-                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${platformStyles[order.platform]}`}
-                    >
-                      {order.platform}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span
-                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${statusStyles[order.status]}`}
-                    >
-                      {order.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-right text-sm font-medium text-slate-900">
-                    {formatPeso(order.total)}
+              {loading && (
+                <tr>
+                  <td colSpan={5} className="px-6 py-12 text-center">
+                    <Loader2 className="mx-auto h-6 w-6 animate-spin text-indigo-600" />
                   </td>
                 </tr>
-              ))}
+              )}
+              {!loading && recentOrders.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="px-6 py-12 text-center text-sm text-slate-500"
+                  >
+                    No orders yet.
+                  </td>
+                </tr>
+              )}
+              {!loading &&
+                recentOrders.map((order) => (
+                  <tr key={order.id} className="hover:bg-slate-50">
+                    <td className="px-6 py-4 text-sm font-medium text-slate-900">
+                      {order.id.slice(0, 8)}
+                    </td>
+                    <td className="px-6 py-4">
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${platformStyles[order.platform] ?? 'bg-slate-100 text-slate-700'}`}
+                      >
+                        {order.platform}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${statusStyles[order.status] ?? 'bg-slate-100 text-slate-700'}`}
+                      >
+                        {order.status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate-500">
+                      {formatDate(order.created_at)}
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm font-medium text-slate-900">
+                      {formatPeso(order.total_amount)}
+                    </td>
+                  </tr>
+                ))}
             </tbody>
           </table>
         </div>

@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import type { FormEvent } from 'react'
-import { AlertTriangle, Plus, X } from 'lucide-react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { AlertTriangle, Loader2, Plus, RefreshCw, X } from 'lucide-react'
+import { supabase } from '../lib/supabase'
 
 /** Recognized condition grades for collectibles. */
 type ConditionGrade =
@@ -11,18 +11,27 @@ type ConditionGrade =
   | 'Fair'
   | 'Poor'
 
-/** Shape of an inventory row (mirrors the `products` table). */
+/**
+ * Shape of a row from the Supabase `products` table.
+ * Columns are snake_case, mirroring schema.sql exactly.
+ */
 interface Product {
-  id: number
+  id: string
+  sku: string
   name: string
-  conditionGrade: ConditionGrade
-  edition: string
-  stockLevel: number
-  reorderPoint: number
+  condition_grade: string
+  edition: string | null
+  variation: string | null
+  stock_level: number
+  reorder_point: number
+  cost: number | null
+  price: number | null
+  created_at: string
 }
 
 /** State for the "Add New Collectible" modal form. */
 interface CollectibleForm {
+  sku: string
   name: string
   conditionGrade: ConditionGrade
   edition: string
@@ -33,8 +42,8 @@ interface CollectibleForm {
   reorderPoint: string
 }
 
-/** Tailwind badge classes per condition grade. */
-const conditionStyles: Record<ConditionGrade, string> = {
+/** Tailwind badge classes per condition grade (with fallback). */
+const conditionStyles: Record<string, string> = {
   Mint: 'bg-emerald-100 text-emerald-700',
   'Near Mint': 'bg-green-100 text-green-700',
   Excellent: 'bg-blue-100 text-blue-700',
@@ -43,52 +52,9 @@ const conditionStyles: Record<ConditionGrade, string> = {
   Poor: 'bg-red-100 text-red-700',
 }
 
-/** Mock inventory — will come from the `products` table later. */
-const mockProducts: Product[] = [
-  {
-    id: 1,
-    name: 'Iron Man MK-85 Figure',
-    conditionGrade: 'Mint',
-    edition: 'First Release',
-    stockLevel: 12,
-    reorderPoint: 5,
-  },
-  {
-    id: 2,
-    name: 'Spider-Man Noir Bust',
-    conditionGrade: 'Near Mint',
-    edition: 'Limited 500',
-    stockLevel: 3,
-    reorderPoint: 5,
-  },
-  {
-    id: 3,
-    name: 'Batman Hush Statue',
-    conditionGrade: 'Mint',
-    edition: "Collector's Edition",
-    stockLevel: 8,
-    reorderPoint: 3,
-  },
-  {
-    id: 4,
-    name: 'Gundam RX-78-2 Model Kit',
-    conditionGrade: 'Excellent',
-    edition: 'Standard',
-    stockLevel: 25,
-    reorderPoint: 10,
-  },
-  {
-    id: 5,
-    name: 'Darth Vader Helmet Replica',
-    conditionGrade: 'Good',
-    edition: 'Anniversary',
-    stockLevel: 2,
-    reorderPoint: 4,
-  },
-]
-
 /** Blank form state used to (re)initialize the modal. */
 const emptyForm: CollectibleForm = {
+  sku: '',
   name: '',
   conditionGrade: 'Mint',
   edition: '',
@@ -100,16 +66,43 @@ const emptyForm: CollectibleForm = {
 }
 
 /**
- * Inventory page: collectibles data table plus an "Add New Collectible"
- * modal form (UI only — database insert logic comes later).
+ * Inventory page: collectibles data table backed by the Supabase
+ * `products` table, plus an "Add New Collectible" modal that inserts
+ * rows and refreshes the list.
  */
 export default function Inventory() {
+  const [products, setProducts] = useState<Product[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [form, setForm] = useState<CollectibleForm>(emptyForm)
+  const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
 
-  /** Open the modal with a fresh, empty form. */
+  /** Fetch products from Supabase (used on mount and after inserts). */
+  const fetchProducts = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    const { data, error: fetchError } = await supabase
+      .from('products')
+      .select('*')
+      .order('created_at', { ascending: false })
+    if (fetchError) {
+      setError(fetchError.message)
+    } else {
+      setProducts(data ?? [])
+    }
+    setLoading(false)
+  }, [])
+
+  // Load products once on mount.
+  useEffect(() => {
+    void fetchProducts()
+  }, [fetchProducts])
+
   const openModal = () => {
     setForm(emptyForm)
+    setFormError(null)
     setIsModalOpen(true)
   }
 
@@ -120,13 +113,33 @@ export default function Inventory() {
     setForm((prev) => ({ ...prev, [field]: value }))
 
   /**
-   * Placeholder submit handler — the Supabase insert logic will be
-   * wired up in a later step. For now we just log and close the modal.
+   * Insert the new collectible into the Supabase `products` table,
+   * then refresh the table so the new row appears immediately.
    */
-  const handleSubmit = (event: FormEvent) => {
+  const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
-    console.log('New collectible (UI only, no DB insert yet):', form)
+    setFormError(null)
+    setSaving(true)
+    const { error: insertError } = await supabase.from('products').insert([
+      {
+        sku: form.sku.trim(),
+        name: form.name.trim(),
+        condition_grade: form.conditionGrade,
+        edition: form.edition.trim() || null,
+        variation: form.variation.trim() || null,
+        stock_level: Number(form.stockLevel) || 0,
+        reorder_point: Number(form.reorderPoint) || 0,
+        cost: form.cost ? Number(form.cost) : null,
+        price: form.price ? Number(form.price) : null,
+      },
+    ])
+    setSaving(false)
+    if (insertError) {
+      setFormError(insertError.message)
+      return
+    }
     closeModal()
+    await fetchProducts()
   }
 
   return (
@@ -149,6 +162,21 @@ export default function Inventory() {
         </button>
       </div>
 
+      {/* Error banner */}
+      {error && (
+        <div className="mb-6 flex items-center justify-between rounded-xl bg-red-50 px-6 py-4 text-sm text-red-700">
+          <span>Failed to load inventory: {error}</span>
+          <button
+            type="button"
+            onClick={() => void fetchProducts()}
+            className="inline-flex items-center gap-2 font-medium underline hover:no-underline"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Try Again
+          </button>
+        </div>
+      )}
+
       {/* Inventory data table */}
       <div className="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
         <table className="min-w-full divide-y divide-slate-200">
@@ -156,6 +184,9 @@ export default function Inventory() {
             <tr>
               <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Product Name
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                SKU
               </th>
               <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Condition
@@ -172,39 +203,60 @@ export default function Inventory() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {mockProducts.map((product) => {
-              const isLowStock = product.stockLevel <= product.reorderPoint
-              return (
-                <tr key={product.id} className="hover:bg-slate-50">
-                  <td className="px-6 py-4 text-sm font-medium text-slate-900">
-                    {product.name}
-                  </td>
-                  <td className="px-6 py-4">
-                    <span
-                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${conditionStyles[product.conditionGrade]}`}
-                    >
-                      {product.conditionGrade}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-slate-500">
-                    {product.edition}
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <span
-                      className={`inline-flex items-center gap-1.5 text-sm font-semibold ${
-                        isLowStock ? 'text-red-600' : 'text-slate-900'
-                      }`}
-                    >
-                      {isLowStock && <AlertTriangle className="h-4 w-4" />}
-                      {product.stockLevel}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-right text-sm text-slate-500">
-                    {product.reorderPoint}
-                  </td>
-                </tr>
-              )
-            })}
+            {loading && (
+              <tr>
+                <td colSpan={6} className="px-6 py-12 text-center">
+                  <Loader2 className="mx-auto h-6 w-6 animate-spin text-indigo-600" />
+                </td>
+              </tr>
+            )}
+            {!loading && products.length === 0 && (
+              <tr>
+                <td
+                  colSpan={6}
+                  className="px-6 py-12 text-center text-sm text-slate-500"
+                >
+                  No collectibles yet — add your first one!
+                </td>
+              </tr>
+            )}
+            {!loading &&
+              products.map((product) => {
+                const isLowStock = product.stock_level <= product.reorder_point
+                return (
+                  <tr key={product.id} className="hover:bg-slate-50">
+                    <td className="px-6 py-4 text-sm font-medium text-slate-900">
+                      {product.name}
+                    </td>
+                    <td className="px-6 py-4 text-xs text-slate-500">
+                      {product.sku}
+                    </td>
+                    <td className="px-6 py-4">
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${conditionStyles[product.condition_grade] ?? 'bg-slate-100 text-slate-700'}`}
+                      >
+                        {product.condition_grade}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate-500">
+                      {product.edition ?? '—'}
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <span
+                        className={`inline-flex items-center gap-1.5 text-sm font-semibold ${
+                          isLowStock ? 'text-red-600' : 'text-slate-900'
+                        }`}
+                      >
+                        {isLowStock && <AlertTriangle className="h-4 w-4" />}
+                        {product.stock_level}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm text-slate-500">
+                      {product.reorder_point}
+                    </td>
+                  </tr>
+                )
+              })}
           </tbody>
         </table>
       </div>
@@ -236,6 +288,34 @@ export default function Inventory() {
 
             {/* Modal form */}
             <form onSubmit={handleSubmit} className="space-y-4 p-6">
+              {formError && (
+                <div
+                  className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700"
+                  role="alert"
+                >
+                  {formError}
+                </div>
+              )}
+
+              {/* SKU */}
+              <div>
+                <label
+                  htmlFor="sku"
+                  className="mb-1 block text-sm font-medium text-slate-700"
+                >
+                  SKU
+                </label>
+                <input
+                  id="sku"
+                  type="text"
+                  required
+                  value={form.sku}
+                  onChange={(e) => handleChange('sku', e.target.value)}
+                  placeholder="e.g. FIG-IM-001"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+
               {/* Name */}
               <div>
                 <label
@@ -267,17 +347,17 @@ export default function Inventory() {
                   id="conditionGrade"
                   value={form.conditionGrade}
                   onChange={(e) =>
-                    handleChange('conditionGrade', e.target.value as ConditionGrade)
+                    handleChange('conditionGrade', e.target.value)
                   }
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 >
-                  {(Object.keys(conditionStyles) as ConditionGrade[]).map(
-                    (grade) => (
-                      <option key={grade} value={grade}>
-                        {grade}
-                      </option>
-                    ),
-                  )}
+                  {(
+                    ['Mint', 'Near Mint', 'Excellent', 'Good', 'Fair', 'Poor'] as ConditionGrade[]
+                  ).map((grade) => (
+                    <option key={grade} value={grade}>
+                      {grade}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -311,13 +391,13 @@ export default function Inventory() {
                     type="text"
                     value={form.variation}
                     onChange={(e) => handleChange('variation', e.target.value)}
-                    placeholder="e.g. Chrome Variant"
+                    placeholder="e.g. Chrome Ver."
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                   />
                 </div>
               </div>
 
-              {/* Cost & Price */}
+              {/* Cost & Selling Price */}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label
@@ -329,8 +409,8 @@ export default function Inventory() {
                   <input
                     id="cost"
                     type="number"
-                    min="0"
                     step="0.01"
+                    min="0"
                     value={form.cost}
                     onChange={(e) => handleChange('cost', e.target.value)}
                     placeholder="0.00"
@@ -342,13 +422,13 @@ export default function Inventory() {
                     htmlFor="price"
                     className="mb-1 block text-sm font-medium text-slate-700"
                   >
-                    Price (₱)
+                    Selling Price (₱)
                   </label>
                   <input
                     id="price"
                     type="number"
-                    min="0"
                     step="0.01"
+                    min="0"
                     value={form.price}
                     onChange={(e) => handleChange('price', e.target.value)}
                     placeholder="0.00"
@@ -388,7 +468,9 @@ export default function Inventory() {
                     type="number"
                     min="0"
                     value={form.reorderPoint}
-                    onChange={(e) => handleChange('reorderPoint', e.target.value)}
+                    onChange={(e) =>
+                      handleChange('reorderPoint', e.target.value)
+                    }
                     placeholder="0"
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                   />
@@ -400,15 +482,17 @@ export default function Inventory() {
                 <button
                   type="button"
                   onClick={closeModal}
-                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                  disabled={saving}
+                  className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Add Collectible
+                  {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {saving ? 'Saving…' : 'Add Collectible'}
                 </button>
               </div>
             </form>
