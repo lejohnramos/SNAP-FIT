@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { AlertTriangle, Loader2, Plus, RefreshCw, X } from 'lucide-react'
+import { AlertTriangle, Loader2, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 /** Recognized condition grades for collectibles. */
@@ -75,6 +75,8 @@ export default function Inventory() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+  /** ID of the product being edited, or null when adding a new one. */
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<CollectibleForm>(emptyForm)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -102,44 +104,116 @@ export default function Inventory() {
 
   const openModal = () => {
     setForm(emptyForm)
+    setEditingId(null)
     setFormError(null)
     setIsModalOpen(true)
   }
 
-  const closeModal = () => setIsModalOpen(false)
+  /**
+   * Open the modal pre-filled with an existing product's data. The
+   * product id is kept in `editingId` so the submit handler knows to
+   * run an UPDATE instead of an INSERT.
+   */
+  const openEditModal = (product: Product) => {
+    setForm({
+      sku: product.sku,
+      name: product.name,
+      conditionGrade: (product.condition_grade as ConditionGrade) ?? 'Mint',
+      edition: product.edition ?? '',
+      variation: product.variation ?? '',
+      cost: product.cost === null ? '' : String(product.cost),
+      price: product.price === null ? '' : String(product.price),
+      stockLevel: String(product.stock_level),
+      reorderPoint: String(product.reorder_point),
+    })
+    setEditingId(product.id)
+    setFormError(null)
+    setIsModalOpen(true)
+  }
+
+  const closeModal = () => {
+    setIsModalOpen(false)
+    setEditingId(null)
+  }
 
   /** Generic change handler for every form field. */
   const handleChange = (field: keyof CollectibleForm, value: string) =>
     setForm((prev) => ({ ...prev, [field]: value }))
 
   /**
-   * Insert the new collectible into the Supabase `products` table,
-   * then refresh the table so the new row appears immediately.
+   * Submit the modal form. When `editingId` is set this performs an
+   * UPDATE on the existing row; otherwise it INSERTs a new row into the
+   * Supabase `products` table. Local state is updated immediately so the
+   * table reflects the change without a page refresh.
    */
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
     setFormError(null)
     setSaving(true)
-    const { error: insertError } = await supabase.from('products').insert([
-      {
-        sku: form.sku.trim(),
-        name: form.name.trim(),
-        condition_grade: form.conditionGrade,
-        edition: form.edition.trim() || null,
-        variation: form.variation.trim() || null,
-        stock_level: Number(form.stockLevel) || 0,
-        reorder_point: Number(form.reorderPoint) || 0,
-        cost: form.cost ? Number(form.cost) : null,
-        price: form.price ? Number(form.price) : null,
-      },
-    ])
-    setSaving(false)
-    if (insertError) {
-      setFormError(insertError.message)
-      return
+
+    const payload = {
+      sku: form.sku.trim(),
+      name: form.name.trim(),
+      condition_grade: form.conditionGrade,
+      edition: form.edition.trim() || null,
+      variation: form.variation.trim() || null,
+      stock_level: Number(form.stockLevel) || 0,
+      reorder_point: Number(form.reorderPoint) || 0,
+      cost: form.cost ? Number(form.cost) : null,
+      price: form.price ? Number(form.price) : null,
+    }
+
+    if (editingId) {
+      // Update the existing row and return it so we can patch local state.
+      const { data, error: updateError } = await supabase
+        .from('products')
+        .update(payload)
+        .eq('id', editingId)
+        .select()
+        .single()
+      setSaving(false)
+      if (updateError) {
+        setFormError(updateError.message)
+        return
+      }
+      setProducts((prev) =>
+        prev.map((product) => (product.id === editingId ? data : product)),
+      )
+    } else {
+      // Insert the new collectible.
+      const { error: insertError } = await supabase
+        .from('products')
+        .insert([payload])
+      setSaving(false)
+      if (insertError) {
+        setFormError(insertError.message)
+        return
+      }
+      // Refresh so the new row appears in its server-sorted position.
+      await fetchProducts()
     }
     closeModal()
-    await fetchProducts()
+  }
+
+  /**
+   * Delete a product after an explicit confirmation. The row is removed
+   * from local state immediately so no page refresh is needed.
+   */
+  const handleDelete = async (product: Product) => {
+    const confirmed = window.confirm(
+      'Are you sure you want to delete this product?',
+    )
+    if (!confirmed) return
+
+    const { error: deleteError } = await supabase
+      .from('products')
+      .delete()
+      .eq('id', product.id)
+    if (deleteError) {
+      setError(deleteError.message)
+      return
+    }
+    setProducts((prev) => prev.filter((p) => p.id !== product.id))
   }
 
   return (
@@ -200,12 +274,15 @@ export default function Inventory() {
               <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Reorder Point
               </th>
+              <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Actions
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading && (
               <tr>
-                <td colSpan={6} className="px-6 py-12 text-center">
+                <td colSpan={7} className="px-6 py-12 text-center">
                   <Loader2 className="mx-auto h-6 w-6 animate-spin text-indigo-600" />
                 </td>
               </tr>
@@ -213,7 +290,7 @@ export default function Inventory() {
             {!loading && products.length === 0 && (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={7}
                   className="px-6 py-12 text-center text-sm text-slate-500"
                 >
                   No collectibles yet — add your first one!
@@ -254,6 +331,27 @@ export default function Inventory() {
                     <td className="px-6 py-4 text-right text-sm text-slate-500">
                       {product.reorder_point}
                     </td>
+                    {/* Row actions: edit and delete */}
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(product)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(product)}
+                          className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-red-700"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Delete
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 )
               })}
@@ -274,7 +372,7 @@ export default function Inventory() {
             {/* Modal header */}
             <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
               <h2 className="text-lg font-semibold text-slate-900">
-                Add New Collectible
+                {editingId ? 'Edit Collectible' : 'Add New Collectible'}
               </h2>
               <button
                 type="button"
@@ -492,7 +590,11 @@ export default function Inventory() {
                   className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {saving ? 'Saving…' : 'Add Collectible'}
+                  {saving
+                    ? 'Saving…'
+                    : editingId
+                      ? 'Save Changes'
+                      : 'Add Collectible'}
                 </button>
               </div>
             </form>
