@@ -7,6 +7,7 @@ interface OrderRow {
   id: string
   platform: string
   status: string
+  product: { name: string } | null
   total_amount: number
   created_at: string
 }
@@ -30,6 +31,7 @@ interface SummaryCard {
 /** Tailwind badge classes per order status (with fallback). */
 const statusStyles: Record<string, string> = {
   Completed: 'bg-emerald-100 text-emerald-700',
+  Delivered: 'bg-emerald-100 text-emerald-700',
   Shipped: 'bg-blue-100 text-blue-700',
   Pending: 'bg-amber-100 text-amber-700',
   Cancelled: 'bg-red-100 text-red-700',
@@ -76,7 +78,7 @@ export default function Dashboard() {
     const [ordersRes, productsRes] = await Promise.all([
       supabase
         .from('orders')
-        .select('id, platform, status, total_amount, created_at')
+        .select('id, platform, status, total_amount, created_at, product:products(name)')
         .order('created_at', { ascending: false })
         .limit(1000),
       supabase.from('products').select('id, stock_level, reorder_point'),
@@ -84,7 +86,10 @@ export default function Dashboard() {
     if (ordersRes.error || productsRes.error) {
       setError(ordersRes.error?.message ?? productsRes.error?.message ?? null)
     } else {
-      setOrders((ordersRes.data as OrderRow[]) ?? [])
+      // `as unknown` bridges supabase-js' inference (it assumes embedded
+      // resources are arrays without generated DB types); at runtime
+      // PostgREST returns a single object for this many-to-one join.
+      setOrders((ordersRes.data as unknown as OrderRow[]) ?? [])
       setProducts((productsRes.data as ProductStock[]) ?? [])
     }
     setLoading(false)
@@ -96,7 +101,9 @@ export default function Dashboard() {
 
   // Derived metrics, computed from the fetched rows.
   const totalSales = orders
-    .filter((o) => o.status === 'Completed')
+    .filter(
+      (o) => o.status === 'Completed' || o.status === 'Delivered',
+    )
     .reduce((sum, o) => sum + (o.total_amount ?? 0), 0)
   const pendingOrders = orders.filter((o) => o.status === 'Pending').length
   const lowStock = products.filter(
@@ -108,7 +115,7 @@ export default function Dashboard() {
     {
       title: 'Total Sales',
       value: formatPeso(totalSales),
-      subtitle: 'Completed orders',
+      subtitle: 'Completed + Delivered orders',
       icon: DollarSign,
       accent: 'bg-emerald-500',
     },
@@ -192,6 +199,9 @@ export default function Dashboard() {
                   Platform
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Product
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Status
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -205,7 +215,7 @@ export default function Dashboard() {
             <tbody className="divide-y divide-slate-100">
               {loading && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center">
+                  <td colSpan={6} className="px-6 py-12 text-center">
                     <Loader2 className="mx-auto h-6 w-6 animate-spin text-indigo-600" />
                   </td>
                 </tr>
@@ -213,7 +223,7 @@ export default function Dashboard() {
               {!loading && recentOrders.length === 0 && (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={6}
                     className="px-6 py-12 text-center text-sm text-slate-500"
                   >
                     No orders yet.
@@ -232,6 +242,9 @@ export default function Dashboard() {
                       >
                         {order.platform}
                       </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate-500">
+                      {order.product?.name ?? '—'}
                     </td>
                     <td className="px-6 py-4">
                       <span
