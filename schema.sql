@@ -71,6 +71,14 @@ alter table orders
 create index if not exists idx_orders_product on orders (product_id);
 
 -- ------------------------------------------------------------
+-- 3b. MIGRATION for existing databases: add customer_name to orders
+--     (lets the Order History Ledger search and export customer names.
+--     Idempotent - run once in the Supabase SQL Editor).
+-- ------------------------------------------------------------
+alter table orders
+  add column if not exists customer_name text;
+
+-- ------------------------------------------------------------
 -- 4. PURCHASE ORDERS
 --    Restock orders placed with suppliers.
 -- ------------------------------------------------------------

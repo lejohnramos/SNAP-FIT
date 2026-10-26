@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import {
   Clock,
   DollarSign,
+  Download,
   Loader2,
   Pencil,
   Plus,
   RefreshCw,
+  Search,
   ShoppingCart,
   Trash2,
   X,
@@ -17,7 +19,7 @@ import { supabase } from '../lib/supabase'
 type Platform = 'Shopee' | 'Lazada' | 'FB'
 
 /** Recognized order statuses shown in the app. */
-type OrderStatus = 'Pending' | 'Shipped' | 'Completed' | 'Cancelled'
+type OrderStatus = 'Pending' | 'Shipped' | 'Delivered' | 'Completed' | 'Cancelled'
 
 /**
  * Shape of a row from the Supabase `orders` table, joined with the
@@ -31,9 +33,18 @@ interface OrderRow {
   total_amount: number
   product_id: string | null
   quantity: number | null
+  /** Customer name captured at order time (optional ledger field). */
+  customer_name: string | null
   created_at: string
   /** Joined via `product:products(name)`; null when the product is gone. */
   product: { name: string } | null
+}
+
+/** Minimal shape of the rows fetched by the 30-day expiry cleanup. */
+interface ExpiredOrder {
+  id: string
+  product_id: string | null
+  quantity: number | null
 }
 
 /** Minimal product shape used by the order form and stock updates. */
@@ -46,6 +57,7 @@ interface ProductOption {
 
 /** State for the New Order modal form. */
 interface OrderForm {
+  customerName: string
   productId: string
   quantity: string
   platform: Platform
@@ -72,15 +84,20 @@ const platformStyles: Record<string, string> = {
 const statusStyles: Record<string, string> = {
   Pending: 'bg-amber-100 text-amber-700',
   Shipped: 'bg-blue-100 text-blue-700',
+  Delivered: 'bg-teal-100 text-teal-700',
   Completed: 'bg-emerald-100 text-emerald-700',
   Cancelled: 'bg-slate-100 text-slate-700',
 }
 
 const platforms: Platform[] = ['Shopee', 'Lazada', 'FB']
-const statuses: OrderStatus[] = ['Pending', 'Shipped', 'Completed', 'Cancelled']
+const statuses: OrderStatus[] = ['Pending', 'Shipped', 'Delivered', 'Completed', 'Cancelled']
+
+/** Rolling expiry window: orders older than this are auto-deleted. */
+const EXPIRY_DAYS = 30
 
 /** Blank form state used to (re)initialize the modal. */
 const emptyForm: OrderForm = {
+  customerName: '',
   productId: '',
   quantity: '',
   platform: 'Shopee',
@@ -106,10 +123,15 @@ export default function Orders() {
   const [products, setProducts] = useState<ProductOption[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  /** Non-critical info banner (e.g. 30-day expiry cleanup results). */
+  const [expiryNotice, setExpiryNotice] = useState<string | null>(null)
 
   // Table filters (applied client-side).
   const [platformFilter, setPlatformFilter] = useState<'All' | Platform>('All')
   const [statusFilter, setStatusFilter] = useState<'All' | OrderStatus>('All')
+  const [searchTerm, setSearchTerm] = useState('')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
 
   // Modal state.
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -118,6 +140,73 @@ export default function Orders() {
   const [form, setForm] = useState<OrderForm>(emptyForm)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+
+  /**
+   * Rolling 30-day data retention. Deletes orders created more than
+   * EXPIRY_DAYS ago so the ledger stays small. Safety check: only
+   * 'Pending' and 'Cancelled' orders are auto-expired; 'Completed' and
+   * 'Delivered' orders are kept as permanent sales records. Any stock
+   * reserved by the deleted orders is returned to the inventory.
+   */
+  const runOrderExpiry = useCallback(async () => {
+    try {
+      const cutoff = new Date(
+        Date.now() - EXPIRY_DAYS * 24 * 60 * 60 * 1000,
+      ).toISOString()
+      // 1. Find expired orders that are safe to delete.
+      const { data: expiredData, error: fetchError } = await supabase
+        .from('orders')
+        .select('id, product_id, quantity')
+        .lt('created_at', cutoff)
+        .in('status', ['Pending', 'Cancelled'])
+      if (fetchError) {
+        console.warn('Order expiry check failed:', fetchError.message)
+        return
+      }
+      const expired = (expiredData as ExpiredOrder[] | null) ?? []
+      if (expired.length === 0) return
+
+      // 2. Delete the expired orders.
+      const { error: deleteError } = await supabase
+        .from('orders')
+        .delete()
+        .in('id', expired.map((order) => order.id))
+      if (deleteError) {
+        console.warn('Order expiry delete failed:', deleteError.message)
+        return
+      }
+
+      // 3. Return the ordered quantities to stock so inventory stays
+      //    accurate (mirrors the manual delete behavior).
+      const byProduct = new Map<string, number>()
+      for (const order of expired) {
+        if (order.product_id && order.quantity) {
+          byProduct.set(
+            order.product_id,
+            (byProduct.get(order.product_id) ?? 0) + order.quantity,
+          )
+        }
+      }
+      for (const [productId, qty] of byProduct) {
+        const { data: product } = await supabase
+          .from('products')
+          .select('stock_level')
+          .eq('id', productId)
+          .single()
+        if (product) {
+          await supabase
+            .from('products')
+            .update({ stock_level: product.stock_level + qty })
+            .eq('id', productId)
+        }
+      }
+      setExpiryNotice(
+        `Auto-cleaned ${expired.length} order(s) older than ${EXPIRY_DAYS} days (Pending/Cancelled only).`,
+      )
+    } catch (expiryError) {
+      console.warn('Order expiry failed:', expiryError)
+    }
+  }, [])
 
   /** Fetch orders from Supabase, newest first (used on mount and after inserts). */
   const fetchOrders = useCallback(async () => {
@@ -146,12 +235,18 @@ export default function Orders() {
     }
   }, [])
 
-  // Load orders and products once on mount.
+  // Load orders and products once on mount, after rolling the 30-day expiry.
   useEffect(() => {
-    setLoading(true)
-    setError(null)
-    void Promise.all([fetchOrders(), fetchProducts()]).finally(() => setLoading(false))
-  }, [fetchOrders, fetchProducts])
+    const init = async () => {
+      setLoading(true)
+      setError(null)
+      // Auto-expire old Pending/Cancelled orders before loading the ledger.
+      await runOrderExpiry()
+      await Promise.all([fetchOrders(), fetchProducts()])
+      setLoading(false)
+    }
+    void init()
+  }, [fetchOrders, fetchProducts, runOrderExpiry])
 
   /** Re-run both fetches after a failure ("Try Again"). */
   const handleRetry = useCallback(async () => {
@@ -164,7 +259,7 @@ export default function Orders() {
   // Derived: key metrics computed from the full (unfiltered) list.
   const totalOrders = orders.length
   const completedRevenue = orders
-    .filter((order) => order.status === 'Completed')
+    .filter((order) => order.status === 'Completed' || order.status === 'Delivered')
     .reduce((sum, order) => sum + (order.total_amount ?? 0), 0)
   const pendingOrders = orders.filter((order) => order.status === 'Pending').length
 
@@ -179,7 +274,7 @@ export default function Orders() {
     {
       title: 'Completed Revenue',
       value: formatPeso(completedRevenue),
-      caption: 'From completed orders',
+      caption: 'From completed & delivered orders',
       icon: DollarSign,
       iconClasses: 'bg-emerald-100 text-emerald-600',
     },
@@ -192,16 +287,74 @@ export default function Orders() {
     },
   ]
 
-  // Client-side filtering by platform and status.
-  const filteredOrders = useMemo(
-    () =>
-      orders.filter(
-        (order) =>
-          (platformFilter === 'All' || order.platform === platformFilter) &&
-          (statusFilter === 'All' || order.status === statusFilter),
-      ),
-    [orders, platformFilter, statusFilter],
-  )
+  // Client-side filtering: platform, status, date range, and search term.
+  const filteredOrders = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase()
+    return orders.filter((order) => {
+      if (platformFilter !== 'All' && order.platform !== platformFilter) return false
+      if (statusFilter !== 'All' && order.status !== statusFilter) return false
+      // Date range (inclusive on both ends, interpreted in local time).
+      const orderDate = new Date(order.created_at)
+      if (startDate && orderDate < new Date(`${startDate}T00:00:00`)) return false
+      if (endDate && orderDate > new Date(`${endDate}T23:59:59.999`)) return false
+      // Search by customer name or order ID.
+      if (term) {
+        const matchesId = order.id.toLowerCase().includes(term)
+        const matchesCustomer = (order.customer_name ?? '').toLowerCase().includes(term)
+        if (!matchesId && !matchesCustomer) return false
+      }
+      return true
+    })
+  }, [orders, platformFilter, statusFilter, startDate, endDate, searchTerm])
+
+  /** Reset every filter back to its default. */
+  const handleClearFilters = () => {
+    setSearchTerm('')
+    setPlatformFilter('All')
+    setStatusFilter('All')
+    setStartDate('')
+    setEndDate('')
+  }
+
+  /**
+   * Export the currently filtered orders as a CSV file that opens in
+   * Excel. A UTF-8 BOM is included so Excel renders the file correctly.
+   */
+  const exportCsv = () => {
+    const headers = [
+      'Order ID',
+      'Platform',
+      'Customer Name',
+      'Product Name',
+      'Quantity',
+      'Status',
+      'Total Amount (PHP)',
+      'Date Created',
+    ]
+    const escape = (value: string) => `"${value.replace(/"/g, '""')}"`
+    const rows = filteredOrders.map((order) =>
+      [
+        order.id,
+        order.platform,
+        order.customer_name ?? '',
+        order.product?.name ?? '',
+        order.quantity ?? '',
+        order.status,
+        order.total_amount ?? 0,
+        new Date(order.created_at).toLocaleString(),
+      ]
+        .map((cell) => escape(String(cell)))
+        .join(','),
+    )
+    const csv = [headers.map(escape).join(','), ...rows].join('\n')
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `orders-${new Date().toISOString().slice(0, 10)}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
 
   /** Current local stock level for a product id. */
   const stockOf = (productId: string): number =>
@@ -240,6 +393,7 @@ export default function Orders() {
   /** Open the modal pre-filled with an existing order's data. */
   const openEditModal = (order: OrderRow) => {
     setForm({
+      customerName: order.customer_name ?? '',
       productId: order.product_id ?? '',
       quantity: order.quantity === null ? '' : String(order.quantity),
       platform: (platforms as string[]).includes(order.platform)
@@ -311,6 +465,7 @@ export default function Orders() {
           product_id: form.productId,
           quantity,
           total_amount: total,
+          customer_name: form.customerName.trim() || null,
         })
         .eq('id', editingOrder.id)
         .select('*, product:products(name)')
@@ -348,6 +503,7 @@ export default function Orders() {
           product_id: form.productId,
           quantity,
           total_amount: total,
+          customer_name: form.customerName.trim() || null,
         },
       ])
       if (insertError) {
@@ -398,8 +554,8 @@ export default function Orders() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Orders</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Track sales from Shopee, Lazada, and Facebook. New orders automatically
-            reduce stock.
+            Complete order history ledger. New orders automatically reduce stock;
+            Pending/Cancelled orders auto-expire after 30 days.
           </p>
         </div>
         <button
@@ -427,6 +583,21 @@ export default function Orders() {
         </div>
       )}
 
+      {/* Info banner (non-critical notices, e.g. 30-day expiry cleanup) */}
+      {expiryNotice && (
+        <div className="mb-6 flex items-center justify-between rounded-lg border border-sky-200 bg-sky-50 px-4 py-3">
+          <p className="text-sm text-sky-700">{expiryNotice}</p>
+          <button
+            type="button"
+            onClick={() => setExpiryNotice(null)}
+            className="ml-4 rounded-lg p-1 text-sky-400 hover:bg-sky-100 hover:text-sky-600"
+            aria-label="Dismiss notice"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       {/* Summary cards */}
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
         {summaryCards.map((card) => (
@@ -446,8 +617,19 @@ export default function Orders() {
         ))}
       </div>
 
-      {/* Filters */}
+      {/* Filters: search, platform, status, and date range */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Search by customer name or order ID..."
+            className="rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            aria-label="Search orders"
+          />
+        </div>
         <select
           value={platformFilter}
           onChange={(e) => setPlatformFilter(e.target.value as 'All' | Platform)}
@@ -474,9 +656,40 @@ export default function Orders() {
             </option>
           ))}
         </select>
+        <input
+          type="date"
+          value={startDate}
+          onChange={(e) => setStartDate(e.target.value)}
+          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          aria-label="Start date"
+        />
+        <span className="text-xs text-slate-400">to</span>
+        <input
+          type="date"
+          value={endDate}
+          onChange={(e) => setEndDate(e.target.value)}
+          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          aria-label="End date"
+        />
+        <button
+          type="button"
+          onClick={handleClearFilters}
+          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          Clear
+        </button>
         <span className="text-sm text-slate-500">
           Showing {filteredOrders.length} of {orders.length} orders
         </span>
+        <button
+          type="button"
+          onClick={exportCsv}
+          disabled={filteredOrders.length === 0}
+          className="ml-auto inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Download className="h-4 w-4" />
+          Export CSV
+        </button>
       </div>
 
       {/* Orders table */}
@@ -489,6 +702,9 @@ export default function Orders() {
               </th>
               <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Platform
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Customer
               </th>
               <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Product Name
@@ -510,7 +726,7 @@ export default function Orders() {
           <tbody className="divide-y divide-slate-100">
             {loading && (
               <tr>
-                <td colSpan={7} className="px-6 py-12 text-center">
+                <td colSpan={8} className="px-6 py-12 text-center">
                   <Loader2 className="mx-auto h-6 w-6 animate-spin text-indigo-600" />
                 </td>
               </tr>
@@ -518,7 +734,7 @@ export default function Orders() {
             {!loading && orders.length === 0 && (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="px-6 py-12 text-center text-sm text-slate-500"
                 >
                   No orders yet — add your first one!
@@ -528,7 +744,7 @@ export default function Orders() {
             {!loading && orders.length > 0 && filteredOrders.length === 0 && (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="px-6 py-12 text-center text-sm text-slate-500"
                 >
                   No orders match the selected filters.
@@ -547,6 +763,9 @@ export default function Orders() {
                     >
                       {order.platform}
                     </span>
+                  </td>
+                  <td className="px-6 py-4 text-sm text-slate-500">
+                    {order.customer_name ?? '—'}
                   </td>
                   <td className="px-6 py-4 text-sm font-medium text-slate-900">
                     {order.product?.name ?? '—'}
@@ -686,6 +905,24 @@ export default function Orders() {
                     ))}
                   </select>
                 </div>
+              </div>
+
+              {/* Customer Name (optional) */}
+              <div className="mb-4">
+                <label
+                  htmlFor="customerName"
+                  className="mb-1 block text-sm font-medium text-slate-700"
+                >
+                  Customer Name <span className="font-normal text-slate-400">(optional)</span>
+                </label>
+                <input
+                  id="customerName"
+                  type="text"
+                  value={form.customerName}
+                  onChange={(e) => handleChange('customerName', e.target.value)}
+                  placeholder="e.g. Juan Dela Cruz"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
               </div>
 
               {/* Status */}
