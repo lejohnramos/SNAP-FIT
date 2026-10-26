@@ -51,9 +51,24 @@ create table if not exists orders (
   platform     text not null
                check (platform in ('Shopee', 'Lazada', 'FB')),
   status       text not null,                       -- e.g. 'Pending', 'Shipped', 'Completed'
+  product_id   uuid references products (id) on delete set null,
+  quantity     integer not null default 1
+               check (quantity > 0),
   total_amount numeric(12, 2) not null default 0,
   created_at   timestamptz not null default now()
 );
+
+-- ------------------------------------------------------------
+-- 3a. MIGRATION for existing databases: add product/quantity to orders
+--     (CREATE TABLE IF NOT EXISTS above will NOT alter a table that
+--     already exists, so run these idempotent statements once in the
+--     Supabase SQL Editor if your orders table predates them).
+-- ------------------------------------------------------------
+alter table orders
+  add column if not exists product_id uuid references products (id) on delete set null;
+alter table orders
+  add column if not exists quantity integer not null default 1 check (quantity > 0);
+create index if not exists idx_orders_product on orders (product_id);
 
 -- ------------------------------------------------------------
 -- 4. PURCHASE ORDERS

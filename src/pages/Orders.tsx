@@ -10,6 +10,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 /** Recognized sales platforms (mirrors the schema CHECK constraint). */
@@ -19,46 +20,60 @@ type Platform = 'Shopee' | 'Lazada' | 'FB'
 type OrderStatus = 'Pending' | 'Shipped' | 'Completed' | 'Cancelled'
 
 /**
- * Shape of a row from the Supabase `orders` table.
- * Columns are snake_case, mirroring schema.sql exactly.
+ * Shape of a row from the Supabase `orders` table, joined with the
+ * referenced product's name. Columns are snake_case, mirroring
+ * schema.sql exactly.
  */
 interface OrderRow {
   id: string
   platform: string
   status: string
   total_amount: number
+  product_id: string | null
+  quantity: number | null
   created_at: string
+  /** Joined via `product:products(name)`; null when the product is gone. */
+  product: { name: string } | null
 }
 
-/** State for the add/edit order modal form. */
+/** Minimal product shape used by the order form and stock updates. */
+interface ProductOption {
+  id: string
+  name: string
+  price: number | null
+  stock_level: number
+}
+
+/** State for the New Order modal form. */
 interface OrderForm {
+  productId: string
+  quantity: string
   platform: Platform
   status: OrderStatus
-  totalAmount: string
 }
 
 /** Summary card descriptor. */
 interface SummaryCard {
   title: string
   value: string
-  subtitle: string
-  icon: typeof DollarSign
-  accent: string
+  caption: string
+  icon: LucideIcon
+  iconClasses: string
 }
 
-/** Tailwind badge classes per order status (with fallback). */
-const statusStyles: Record<string, string> = {
-  Completed: 'bg-emerald-100 text-emerald-700',
-  Shipped: 'bg-blue-100 text-blue-700',
-  Pending: 'bg-amber-100 text-amber-700',
-  Cancelled: 'bg-red-100 text-red-700',
-}
-
-/** Tailwind badge classes per platform (with fallback). */
+/** Tailwind badge classes per platform (with fallback for unknown values). */
 const platformStyles: Record<string, string> = {
   Shopee: 'bg-orange-100 text-orange-700',
-  Lazada: 'bg-sky-100 text-sky-700',
-  FB: 'bg-indigo-100 text-indigo-700',
+  Lazada: 'bg-blue-100 text-blue-700',
+  FB: 'bg-purple-100 text-purple-700',
+}
+
+/** Tailwind badge classes per order status (with fallback for unknown values). */
+const statusStyles: Record<string, string> = {
+  Pending: 'bg-amber-100 text-amber-700',
+  Shipped: 'bg-blue-100 text-blue-700',
+  Completed: 'bg-emerald-100 text-emerald-700',
+  Cancelled: 'bg-slate-100 text-slate-700',
 }
 
 const platforms: Platform[] = ['Shopee', 'Lazada', 'FB']
@@ -66,34 +81,29 @@ const statuses: OrderStatus[] = ['Pending', 'Shipped', 'Completed', 'Cancelled']
 
 /** Blank form state used to (re)initialize the modal. */
 const emptyForm: OrderForm = {
+  productId: '',
+  quantity: '',
   platform: 'Shopee',
   status: 'Pending',
-  totalAmount: '',
 }
 
-/** Format an amount as Philippine Pesos. */
-function formatPeso(amount: number): string {
-  return `₱${amount.toLocaleString('en-PH', {
-    minimumFractionDigits: 2,
+/** Format a number as Philippine pesos. */
+const formatPeso = (value: number) =>
+  new Intl.NumberFormat('en-PH', {
+    style: 'currency',
+    currency: 'PHP',
     maximumFractionDigits: 2,
-  })}`
-}
-
-/** Format an ISO timestamp as a short local date. */
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-PH', {
-    month: 'short',
-    day: 'numeric',
-  })
-}
+  }).format(value)
 
 /**
- * Orders page: full order tracking backed by the Supabase `orders`
- * table — summary metrics, platform/status filters, and add / edit /
- * delete via the same modal pattern used on the Inventory page.
+ * Orders page: sales orders backed by the Supabase `orders` table.
+ * Adding an order subtracts the ordered quantity from the selected
+ * product's `stock_level`; editing/deleting reconciles stock so the
+ * inventory page always matches.
  */
 export default function Orders() {
   const [orders, setOrders] = useState<OrderRow[]>([])
+  const [products, setProducts] = useState<ProductOption[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -103,20 +113,17 @@ export default function Orders() {
 
   // Modal state.
   const [isModalOpen, setIsModalOpen] = useState(false)
-  /** ID of the order being edited, or null when adding a new one. */
-  const [editingId, setEditingId] = useState<string | null>(null)
+  /** The order being edited, or null when adding a new one. */
+  const [editingOrder, setEditingOrder] = useState<OrderRow | null>(null)
   const [form, setForm] = useState<OrderForm>(emptyForm)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
-  /** Fetch orders from Supabase (used on mount and after inserts). */
+  /** Fetch orders from Supabase, newest first (used on mount and after inserts). */
   const fetchOrders = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    // Limit keeps the payload sane; matches the Dashboard query.
     const { data, error: fetchError } = await supabase
       .from('orders')
-      .select('*')
+      .select('*, product:products(name)')
       .order('created_at', { ascending: false })
       .limit(1000)
     if (fetchError) {
@@ -124,149 +131,248 @@ export default function Orders() {
     } else {
       setOrders((data as OrderRow[]) ?? [])
     }
-    setLoading(false)
   }, [])
 
-  // Load orders once on mount.
+  /** Fetch the product list used by the order form and stock updates. */
+  const fetchProducts = useCallback(async () => {
+    const { data, error: fetchError } = await supabase
+      .from('products')
+      .select('id, name, price, stock_level')
+      .order('name', { ascending: true })
+    if (fetchError) {
+      setError(fetchError.message)
+    } else {
+      setProducts((data as ProductOption[]) ?? [])
+    }
+  }, [])
+
+  // Load orders and products once on mount.
   useEffect(() => {
-    void fetchOrders()
-  }, [fetchOrders])
+    setLoading(true)
+    setError(null)
+    void Promise.all([fetchOrders(), fetchProducts()]).finally(() => setLoading(false))
+  }, [fetchOrders, fetchProducts])
 
-  // Derived metrics, computed from the full (unfiltered) list.
+  /** Re-run both fetches after a failure ("Try Again"). */
+  const handleRetry = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    await Promise.all([fetchOrders(), fetchProducts()])
+    setLoading(false)
+  }, [fetchOrders, fetchProducts])
+
+  // Derived: key metrics computed from the full (unfiltered) list.
+  const totalOrders = orders.length
   const completedRevenue = orders
-    .filter((o) => o.status === 'Completed')
-    .reduce((sum, o) => sum + (o.total_amount ?? 0), 0)
-  const pendingCount = orders.filter((o) => o.status === 'Pending').length
-
-  // Rows shown in the table after applying the filters.
-  const filteredOrders = useMemo(
-    () =>
-      orders.filter(
-        (o) =>
-          (platformFilter === 'All' || o.platform === platformFilter) &&
-          (statusFilter === 'All' || o.status === statusFilter),
-      ),
-    [orders, platformFilter, statusFilter],
-  )
+    .filter((order) => order.status === 'Completed')
+    .reduce((sum, order) => sum + (order.total_amount ?? 0), 0)
+  const pendingOrders = orders.filter((order) => order.status === 'Pending').length
 
   const summaryCards: SummaryCard[] = [
     {
       title: 'Total Orders',
-      value: String(orders.length),
-      subtitle: 'All platforms',
+      value: String(totalOrders),
+      caption: 'All time',
       icon: ShoppingCart,
-      accent: 'bg-indigo-600',
+      iconClasses: 'bg-indigo-100 text-indigo-600',
     },
     {
       title: 'Completed Revenue',
       value: formatPeso(completedRevenue),
-      subtitle: 'Completed orders only',
+      caption: 'From completed orders',
       icon: DollarSign,
-      accent: 'bg-emerald-600',
+      iconClasses: 'bg-emerald-100 text-emerald-600',
     },
     {
       title: 'Pending Orders',
-      value: String(pendingCount),
-      subtitle: 'Awaiting fulfillment',
+      value: String(pendingOrders),
+      caption: 'Awaiting fulfillment',
       icon: Clock,
-      accent: 'bg-amber-500',
+      iconClasses: 'bg-amber-100 text-amber-600',
     },
   ]
 
+  // Client-side filtering by platform and status.
+  const filteredOrders = useMemo(
+    () =>
+      orders.filter(
+        (order) =>
+          (platformFilter === 'All' || order.platform === platformFilter) &&
+          (statusFilter === 'All' || order.status === statusFilter),
+      ),
+    [orders, platformFilter, statusFilter],
+  )
+
+  /** Current local stock level for a product id. */
+  const stockOf = (productId: string): number =>
+    products.find((p) => p.id === productId)?.stock_level ?? 0
+
+  /** Patch a product's stock level in local state. */
+  const setStock = (productId: string, level: number) =>
+    setProducts((prev) =>
+      prev.map((p) => (p.id === productId ? { ...p, stock_level: level } : p)),
+    )
+
+  /**
+   * Persist a product's stock level to Supabase and mirror it in local
+   * state. Returns false (and raises the page error banner) on failure.
+   */
+  const persistStock = async (productId: string, newLevel: number) => {
+    const { error: stockError } = await supabase
+      .from('products')
+      .update({ stock_level: newLevel })
+      .eq('id', productId)
+    if (stockError) {
+      setError(`Order saved, but the stock update failed: ${stockError.message}`)
+      return false
+    }
+    setStock(productId, newLevel)
+    return true
+  }
+
   const openModal = () => {
     setForm(emptyForm)
-    setEditingId(null)
+    setEditingOrder(null)
     setFormError(null)
     setIsModalOpen(true)
   }
 
-  /**
-   * Open the modal pre-filled with an existing order's data. The order
-   * id is kept in `editingId` so the submit handler knows to run an
-   * UPDATE instead of an INSERT.
-   */
+  /** Open the modal pre-filled with an existing order's data. */
   const openEditModal = (order: OrderRow) => {
     setForm({
+      productId: order.product_id ?? '',
+      quantity: order.quantity === null ? '' : String(order.quantity),
       platform: (platforms as string[]).includes(order.platform)
         ? (order.platform as Platform)
         : 'Shopee',
       status: (statuses as string[]).includes(order.status)
         ? (order.status as OrderStatus)
         : 'Pending',
-      totalAmount:
-        order.total_amount === null ? '' : String(order.total_amount),
     })
-    setEditingId(order.id)
+    setEditingOrder(order)
     setFormError(null)
     setIsModalOpen(true)
   }
 
   const closeModal = () => {
     setIsModalOpen(false)
-    setEditingId(null)
+    setEditingOrder(null)
   }
 
   /** Generic change handler for every form field. */
   const handleChange = (field: keyof OrderForm, value: string) =>
     setForm((prev) => ({ ...prev, [field]: value }))
 
+  /** Selected product, for the live order-total preview in the modal. */
+  const selectedProduct = products.find((p) => p.id === form.productId) ?? null
+  const previewQuantity = Number(form.quantity)
+  const previewTotal =
+    selectedProduct && form.quantity !== '' && Number.isFinite(previewQuantity) && previewQuantity > 0
+      ? (selectedProduct.price ?? 0) * previewQuantity
+      : null
+
   /**
-   * Submit the modal form. When `editingId` is set this performs an
-   * UPDATE on the existing row; otherwise it INSERTs a new row into the
-   * Supabase `orders` table. Local state is updated immediately so the
-   * table reflects the change without a page refresh.
+   * Submit the modal form. When `editingOrder` is set this performs an
+   * UPDATE on the existing row and reconciles stock; otherwise it
+   * INSERTs a new order and then subtracts the ordered quantity from
+   * the selected product's `stock_level`.
    */
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
     setFormError(null)
-    setSaving(true)
 
-    const payload = {
-      platform: form.platform,
-      status: form.status,
-      total_amount: form.totalAmount ? Number(form.totalAmount) : 0,
+    // Validate the product and quantity before touching the database.
+    if (!form.productId) {
+      setFormError('Please select a product.')
+      return
+    }
+    const quantity = Number(form.quantity)
+    if (!form.quantity || !Number.isInteger(quantity) || quantity < 1) {
+      setFormError('Quantity must be a whole number of at least 1.')
+      return
+    }
+    const product = products.find((p) => p.id === form.productId)
+    if (!product) {
+      setFormError('The selected product could not be found. Please refresh and try again.')
+      return
     }
 
-    if (editingId) {
-      // Update the existing row and return it so we can patch local state.
+    setSaving(true)
+    // Total amount is derived from the product's selling price.
+    const total = (product.price ?? 0) * quantity
+
+    if (editingOrder) {
+      // ---- EDIT: update the order row, then reconcile stock levels ----
       const { data, error: updateError } = await supabase
         .from('orders')
-        .update(payload)
-        .eq('id', editingId)
-        .select()
+        .update({
+          platform: form.platform,
+          status: form.status,
+          product_id: form.productId,
+          quantity,
+          total_amount: total,
+        })
+        .eq('id', editingOrder.id)
+        .select('*, product:products(name)')
         .single()
-      setSaving(false)
       if (updateError) {
+        setSaving(false)
         setFormError(updateError.message)
         return
       }
       setOrders((prev) =>
-        prev.map((order) => (order.id === editingId ? data : order)),
+        prev.map((order) => (order.id === editingOrder.id ? data : order)),
       )
-    } else {
-      // Insert the new order.
-      const { error: insertError } = await supabase
-        .from('orders')
-        .insert([payload])
+
+      // Reconcile stock: return the old quantity, then subtract the new one.
+      const oldProductId = editingOrder.product_id
+      const oldQuantity = editingOrder.quantity ?? 0
+      if (oldProductId === form.productId) {
+        const delta = quantity - oldQuantity
+        if (delta !== 0) {
+          await persistStock(form.productId, stockOf(form.productId) - delta)
+        }
+      } else {
+        if (oldProductId) {
+          await persistStock(oldProductId, stockOf(oldProductId) + oldQuantity)
+        }
+        await persistStock(form.productId, stockOf(form.productId) - quantity)
+      }
       setSaving(false)
+    } else {
+      // ---- ADD: insert the order first... ----
+      const { error: insertError } = await supabase.from('orders').insert([
+        {
+          platform: form.platform,
+          status: form.status,
+          product_id: form.productId,
+          quantity,
+          total_amount: total,
+        },
+      ])
       if (insertError) {
+        setSaving(false)
         setFormError(insertError.message)
         return
       }
+
+      // ---- CRUCIAL: ...then subtract the ordered quantity from stock ----
+      await persistStock(form.productId, product.stock_level - quantity)
+
       // Refresh so the new order appears in its server-sorted position.
       await fetchOrders()
+      setSaving(false)
     }
     closeModal()
   }
 
   /**
    * Delete an order after an explicit confirmation. The row is removed
-   * from local state immediately so no page refresh is needed.
+   * from local state immediately, and the ordered quantity is returned
+   * to the product's stock so inventory stays accurate.
    */
   const handleDelete = async (order: OrderRow) => {
-    const confirmed = window.confirm(
-      'Are you sure you want to delete this order?',
-    )
+    const confirmed = window.confirm('Are you sure you want to delete this order?')
     if (!confirmed) return
 
     const { error: deleteError } = await supabase
@@ -278,6 +384,11 @@ export default function Orders() {
       return
     }
     setOrders((prev) => prev.filter((o) => o.id !== order.id))
+
+    // Return the ordered quantity to stock so inventory stays accurate.
+    if (order.product_id && order.quantity) {
+      await persistStock(order.product_id, stockOf(order.product_id) + order.quantity)
+    }
   }
 
   return (
@@ -287,13 +398,14 @@ export default function Orders() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Orders</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Track customer orders from Shopee, Lazada, and Facebook.
+            Track sales from Shopee, Lazada, and Facebook. New orders automatically
+            reduce stock.
           </p>
         </div>
         <button
           type="button"
           onClick={openModal}
-          className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+          className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
         >
           <Plus className="h-4 w-4" />
           New Order
@@ -302,51 +414,45 @@ export default function Orders() {
 
       {/* Error banner */}
       {error && (
-        <div className="mb-6 flex items-center justify-between rounded-xl bg-red-50 px-6 py-4 text-sm text-red-700">
-          <span>Failed to load orders: {error}</span>
+        <div className="mb-6 flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+          <p className="text-sm text-red-700">{error}</p>
           <button
             type="button"
-            onClick={() => void fetchOrders()}
-            className="inline-flex items-center gap-2 font-medium underline hover:no-underline"
+            onClick={() => void handleRetry()}
+            className="ml-4 inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
           >
-            <RefreshCw className="h-4 w-4" />
+            <RefreshCw className="h-3.5 w-3.5" />
             Try Again
           </button>
         </div>
       )}
 
       {/* Summary cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {summaryCards.map(({ title, value, subtitle, icon: Icon, accent }) => (
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {summaryCards.map((card) => (
           <div
-            key={title}
-            className="rounded-xl bg-white p-6 shadow-sm ring-1 ring-slate-200"
+            key={card.title}
+            className="flex items-center justify-between rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200"
           >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-slate-500">{title}</p>
-                <p className="mt-2 text-2xl font-bold text-slate-900">
-                  {value}
-                </p>
-                <p className="mt-1 text-xs text-slate-500">{subtitle}</p>
-              </div>
-              <div
-                className={`flex h-12 w-12 items-center justify-center rounded-lg ${accent}`}
-              >
-                <Icon className="h-6 w-6 text-white" />
-              </div>
+            <div>
+              <p className="text-sm font-medium text-slate-500">{card.title}</p>
+              <p className="mt-1 text-2xl font-bold text-slate-900">{card.value}</p>
+              <p className="mt-1 text-xs text-slate-400">{card.caption}</p>
+            </div>
+            <div className={`rounded-full p-3 ${card.iconClasses}`}>
+              <card.icon className="h-5 w-5" />
             </div>
           </div>
         ))}
       </div>
 
       {/* Filters */}
-      <div className="mt-6 flex flex-wrap items-center gap-3">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <select
-          aria-label="Filter by platform"
           value={platformFilter}
           onChange={(e) => setPlatformFilter(e.target.value as 'All' | Platform)}
           className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          aria-label="Filter by platform"
         >
           <option value="All">All Platforms</option>
           {platforms.map((platform) => (
@@ -356,10 +462,10 @@ export default function Orders() {
           ))}
         </select>
         <select
-          aria-label="Filter by status"
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as 'All' | OrderStatus)}
           className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          aria-label="Filter by status"
         >
           <option value="All">All Statuses</option>
           {statuses.map((status) => (
@@ -373,8 +479,8 @@ export default function Orders() {
         </span>
       </div>
 
-      {/* Orders data table */}
-      <div className="mt-4 overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
+      {/* Orders table */}
+      <div className="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
         <table className="min-w-full divide-y divide-slate-200">
           <thead className="bg-slate-50">
             <tr>
@@ -385,13 +491,16 @@ export default function Orders() {
                 Platform
               </th>
               <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Status
+                Product Name
               </th>
               <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Date
+                Quantity
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Status
               </th>
               <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Total
+                Total Amount
               </th>
               <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Actions
@@ -401,27 +510,35 @@ export default function Orders() {
           <tbody className="divide-y divide-slate-100">
             {loading && (
               <tr>
-                <td colSpan={6} className="px-6 py-12 text-center">
+                <td colSpan={7} className="px-6 py-12 text-center">
                   <Loader2 className="mx-auto h-6 w-6 animate-spin text-indigo-600" />
                 </td>
               </tr>
             )}
-            {!loading && filteredOrders.length === 0 && (
+            {!loading && orders.length === 0 && (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={7}
                   className="px-6 py-12 text-center text-sm text-slate-500"
                 >
-                  {orders.length === 0
-                    ? 'No orders yet — add your first one!'
-                    : 'No orders match the selected filters.'}
+                  No orders yet — add your first one!
+                </td>
+              </tr>
+            )}
+            {!loading && orders.length > 0 && filteredOrders.length === 0 && (
+              <tr>
+                <td
+                  colSpan={7}
+                  className="px-6 py-12 text-center text-sm text-slate-500"
+                >
+                  No orders match the selected filters.
                 </td>
               </tr>
             )}
             {!loading &&
               filteredOrders.map((order) => (
                 <tr key={order.id} className="hover:bg-slate-50">
-                  <td className="px-6 py-4 text-sm font-medium text-slate-900">
+                  <td className="px-6 py-4 text-xs font-medium text-slate-500">
                     {order.id.slice(0, 8)}
                   </td>
                   <td className="px-6 py-4">
@@ -431,6 +548,12 @@ export default function Orders() {
                       {order.platform}
                     </span>
                   </td>
+                  <td className="px-6 py-4 text-sm font-medium text-slate-900">
+                    {order.product?.name ?? '—'}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-slate-500">
+                    {order.quantity ?? '—'}
+                  </td>
                   <td className="px-6 py-4">
                     <span
                       className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${statusStyles[order.status] ?? 'bg-slate-100 text-slate-700'}`}
@@ -438,10 +561,7 @@ export default function Orders() {
                       {order.status}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-sm text-slate-500">
-                    {formatDate(order.created_at)}
-                  </td>
-                  <td className="px-6 py-4 text-right text-sm font-medium text-slate-900">
+                  <td className="px-6 py-4 text-right text-sm font-semibold text-slate-900">
                     {formatPeso(order.total_amount)}
                   </td>
                   {/* Row actions: edit and delete */}
@@ -450,18 +570,18 @@ export default function Orders() {
                       <button
                         type="button"
                         onClick={() => openEditModal(order)}
-                        className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                        title="Edit order"
+                        className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-indigo-600"
                       >
-                        <Pencil className="h-3.5 w-3.5" />
-                        Edit
+                        <Pencil className="h-4 w-4" />
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleDelete(order)}
-                        className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-red-700"
+                        onClick={() => void handleDelete(order)}
+                        title="Delete order"
+                        className="rounded-lg p-2 text-slate-500 hover:bg-red-50 hover:text-red-600"
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        Delete
+                        <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
                   </td>
@@ -471,66 +591,105 @@ export default function Orders() {
         </table>
       </div>
 
-      {/* Add/Edit Order modal */}
+      {/* New/Edit Order modal */}
       {isModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={closeModal} // Clicking the backdrop closes the modal
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          onClick={closeModal}
         >
           <div
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white shadow-xl"
-            onClick={(e) => e.stopPropagation()} // Prevent backdrop click from closing
+            className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
           >
-            {/* Modal header */}
-            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+            <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-slate-900">
-                {editingId ? 'Edit Order' : 'New Order'}
+                {editingOrder ? 'Edit Order' : 'New Order'}
               </h2>
               <button
                 type="button"
                 onClick={closeModal}
                 className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                aria-label="Close modal"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            {/* Modal form */}
-            <form onSubmit={handleSubmit} className="space-y-4 p-6">
-              {formError && (
-                <div
-                  className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700"
-                  role="alert"
-                >
-                  {formError}
-                </div>
-              )}
+            {/* In-modal error (save failures) */}
+            {formError && (
+              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {formError}
+              </div>
+            )}
 
-              {/* Platform */}
-              <div>
+            <form onSubmit={handleSubmit}>
+              {/* Product */}
+              <div className="mb-4">
                 <label
-                  htmlFor="platform"
+                  htmlFor="product"
                   className="mb-1 block text-sm font-medium text-slate-700"
                 >
-                  Platform
+                  Product
                 </label>
                 <select
-                  id="platform"
-                  value={form.platform}
-                  onChange={(e) => handleChange('platform', e.target.value)}
+                  id="product"
+                  value={form.productId}
+                  onChange={(e) => handleChange('productId', e.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 >
-                  {platforms.map((platform) => (
-                    <option key={platform} value={platform}>
-                      {platform}
+                  <option value="">Select a product…</option>
+                  {products.map((product) => (
+                    <option key={product.id} value={product.id}>
+                      {product.name} (stock: {product.stock_level})
                     </option>
                   ))}
                 </select>
               </div>
 
+
+              {/* Quantity & Platform */}
+              <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label
+                    htmlFor="quantity"
+                    className="mb-1 block text-sm font-medium text-slate-700"
+                  >
+                    Quantity
+                  </label>
+                  <input
+                    id="quantity"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={form.quantity}
+                    onChange={(e) => handleChange('quantity', e.target.value)}
+                    placeholder="1"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="platform"
+                    className="mb-1 block text-sm font-medium text-slate-700"
+                  >
+                    Platform
+                  </label>
+                  <select
+                    id="platform"
+                    value={form.platform}
+                    onChange={(e) => handleChange('platform', e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  >
+                    {platforms.map((platform) => (
+                      <option key={platform} value={platform}>
+                        {platform}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               {/* Status */}
-              <div>
+              <div className="mb-4">
                 <label
                   htmlFor="status"
                   className="mb-1 block text-sm font-medium text-slate-700"
@@ -551,25 +710,13 @@ export default function Orders() {
                 </select>
               </div>
 
-              {/* Total Amount */}
-              <div>
-                <label
-                  htmlFor="totalAmount"
-                  className="mb-1 block text-sm font-medium text-slate-700"
-                >
-                  Total Amount (₱)
-                </label>
-                <input
-                  id="totalAmount"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={form.totalAmount}
-                  onChange={(e) => handleChange('totalAmount', e.target.value)}
-                  placeholder="0.00"
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                />
-              </div>
+              {/* Live order-total preview */}
+              {previewTotal !== null && (
+                <div className="mb-4 rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-700 ring-1 ring-slate-200">
+                  Order total: <span className="font-semibold">{formatPeso(previewTotal)}</span>
+                  <span className="ml-1 text-xs text-slate-400">(price × quantity)</span>
+                </div>
+              )}
 
               {/* Modal actions */}
               <div className="flex justify-end gap-3 pt-2">
@@ -586,11 +733,7 @@ export default function Orders() {
                   className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {saving
-                    ? 'Saving…'
-                    : editingId
-                      ? 'Save Changes'
-                      : 'Add Order'}
+                  {saving ? 'Saving…' : editingOrder ? 'Save Changes' : 'Add Order'}
                 </button>
               </div>
             </form>
@@ -600,4 +743,3 @@ export default function Orders() {
     </div>
   )
 }
-
