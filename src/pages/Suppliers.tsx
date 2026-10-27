@@ -28,6 +28,9 @@ const emptyForm: SupplierForm = {
   rating: '',
 }
 
+/** Allowed rating dropdown values (1-5, stored as whole numbers). */
+const RATING_OPTIONS = ['1', '2', '3', '4', '5']
+
 /**
  * Suppliers page: vendor directory backed by the Supabase `suppliers`
  * table, with add/edit/delete through a modal form.
@@ -80,7 +83,11 @@ export default function Suppliers() {
       rating:
         supplier.performance_rating === null
           ? ''
-          : String(supplier.performance_rating),
+          // Snap legacy fractional ratings (e.g. 3.5) to the nearest
+          // whole star so they map cleanly onto the 1-5 dropdown.
+          : String(
+              Math.min(5, Math.max(1, Math.round(supplier.performance_rating))),
+            ),
     })
     setEditingId(supplier.id)
     setFormError(null)
@@ -269,9 +276,28 @@ export default function Suppliers() {
                   </td>
                   <td className="px-6 py-4 text-sm">
                     {supplier.performance_rating !== null ? (
-                      <span className="inline-flex items-center gap-1 font-medium text-amber-600">
-                        <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
-                        {supplier.performance_rating.toFixed(1)}
+                      <span
+                        className="inline-flex items-center gap-2"
+                        title={`${supplier.performance_rating.toFixed(1)} / 5`}
+                      >
+                        {/* 1-5 star visual: filled stars = rounded rating */}
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <Star
+                            key={star}
+                            className={`h-4 w-4 ${
+                              star <=
+                              Math.min(
+                                5,
+                                Math.max(0, Math.round(supplier.performance_rating as number)),
+                              )
+                                ? 'fill-amber-400 text-amber-400'
+                                : 'text-slate-300'
+                            }`}
+                          />
+                        ))}
+                        <span className="font-medium text-slate-700">
+                          {supplier.performance_rating.toFixed(1)}
+                        </span>
                       </span>
                     ) : (
                       <span className="text-slate-400">—</span>
@@ -371,25 +397,27 @@ export default function Suppliers() {
                 />
               </div>
 
-              {/* Performance rating */}
+              {/* Performance rating (1-5 dropdown) */}
               <div>
                 <label
                   htmlFor="supplier-rating"
                   className="block text-sm font-medium text-slate-700"
                 >
-                  Performance Rating (0-5)
+                  Performance Rating (1-5)
                 </label>
-                <input
+                <select
                   id="supplier-rating"
-                  type="number"
-                  min={0}
-                  max={5}
-                  step={0.5}
                   value={form.rating}
                   onChange={(e) => handleChange('rating', e.target.value)}
-                  placeholder="e.g. 4.5"
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                />
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                >
+                  <option value="">Not rated</option>
+                  {RATING_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option} Star{option === '1' ? '' : 's'}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {/* Modal-level validation / API error */}
