@@ -148,7 +148,7 @@ export default function Dashboard() {
         <button
           type="button"
           onClick={() => void fetchData()}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-50"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           Refresh
@@ -232,7 +232,7 @@ export default function Dashboard() {
               )}
               {!loading &&
                 recentOrders.map((order) => (
-                  <tr key={order.id} className="hover:bg-slate-50">
+                  <tr key={order.id} className="transition-colors duration-200 hover:bg-slate-50">
                     <td className="px-6 py-4 text-sm font-medium text-slate-900">
                       {order.id.slice(0, 8)}
                     </td>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import { Loader2, Pencil, Plus, RefreshCw, Star, Trash2, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
@@ -201,14 +202,16 @@ export default function Suppliers() {
             Manage the vendors you source collectibles from.
           </p>
         </div>
-        <button
+        <motion.button
           type="button"
           onClick={openModal}
-          className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700"
+          whileHover={{ scale: 1.03 }}
+          whileTap={{ scale: 0.97 }}
+          className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 hover:shadow-lg"
         >
           <Plus className="h-4 w-4" />
           Add New Supplier
-        </button>
+        </motion.button>
       </div>
 
       {/* Fetch error banner with retry */}
@@ -267,7 +270,7 @@ export default function Suppliers() {
             )}
             {!loading &&
               suppliers.map((supplier) => (
-                <tr key={supplier.id} className="hover:bg-slate-50">
+                <tr key={supplier.id} className="transition-colors duration-200 hover:bg-slate-50">
                   <td className="px-6 py-4 text-sm font-medium text-slate-900">
                     {supplier.name}
                   </td>
@@ -330,14 +333,24 @@ export default function Suppliers() {
       </div>
 
       {/* Add/Edit supplier modal */}
+      <AnimatePresence>
       {isModalOpen && (
-        <div
+        <motion.div
+          key="modal"
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
           onClick={closeModal}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2, ease: 'easeOut' }}
         >
-          <div
+          <motion.div
             className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
             onClick={(e) => e.stopPropagation()}
+            initial={{ opacity: 0, scale: 0.9, y: 12 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 12 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
           >
             <div className="flex items-start justify-between">
               <div>
@@ -436,19 +449,22 @@ export default function Suppliers() {
                 >
                   Cancel
                 </button>
-                <button
+                <motion.button
                   type="submit"
                   disabled={saving}
-                  className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
+                  className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {saving && <Loader2 className="h-4 w-4 animate-spin" />}
                   {editingId ? 'Save Changes' : 'Add Supplier'}
-                </button>
+                </motion.button>
               </div>
             </form>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
+      </AnimatePresence>
     </div>
   )
 }

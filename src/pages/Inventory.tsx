@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import { AlertTriangle, Loader2, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
@@ -226,14 +227,16 @@ export default function Inventory() {
             Manage your collectible stock levels and reorder points.
           </p>
         </div>
-        <button
+        <motion.button
           type="button"
           onClick={openModal}
-          className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+          whileHover={{ scale: 1.03 }}
+          whileTap={{ scale: 0.97 }}
+          className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
         >
           <Plus className="h-4 w-4" />
           Add New Collectible
-        </button>
+        </motion.button>
       </div>
 
       {/* Error banner */}
@@ -301,7 +304,7 @@ export default function Inventory() {
               products.map((product) => {
                 const isLowStock = product.stock_level <= product.reorder_point
                 return (
-                  <tr key={product.id} className="hover:bg-slate-50">
+                  <tr key={product.id} className="transition-colors duration-200 hover:bg-slate-50">
                     <td className="px-6 py-4 text-sm font-medium text-slate-900">
                       {product.name}
                     </td>
@@ -360,14 +363,24 @@ export default function Inventory() {
       </div>
 
       {/* Add New Collectible modal */}
+      <AnimatePresence>
       {isModalOpen && (
-        <div
+        <motion.div
+          key="modal"
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           onClick={closeModal} // Clicking the backdrop closes the modal
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2, ease: 'easeOut' }}
         >
-          <div
+          <motion.div
             className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white shadow-xl"
             onClick={(e) => e.stopPropagation()} // Prevent backdrop click from closing
+            initial={{ opacity: 0, scale: 0.9, y: 12 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 12 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
           >
             {/* Modal header */}
             <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
@@ -584,10 +597,12 @@ export default function Inventory() {
                 >
                   Cancel
                 </button>
-                <button
+                <motion.button
                   type="submit"
                   disabled={saving}
-                  className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
+                  className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {saving && <Loader2 className="h-4 w-4 animate-spin" />}
                   {saving
@@ -595,12 +610,13 @@ export default function Inventory() {
                     : editingId
                       ? 'Save Changes'
                       : 'Add Collectible'}
-                </button>
+                </motion.button>
               </div>
             </form>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
+      </AnimatePresence>
     </div>
   )
 }
