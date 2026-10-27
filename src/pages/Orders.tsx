@@ -21,6 +21,9 @@ type Platform = 'Shopee' | 'Lazada' | 'FB'
 /** Recognized order statuses shown in the app. */
 type OrderStatus = 'Pending' | 'Shipped' | 'Delivered' | 'Completed' | 'Cancelled'
 
+/** Recognized order types: a regular in-stock sale vs a customer pre-order. */
+type OrderType = 'Standard' | 'Pre-order'
+
 /**
  * Shape of a row from the Supabase `orders` table, joined with the
  * referenced product's name. Columns are snake_case, mirroring
@@ -35,6 +38,8 @@ interface OrderRow {
   quantity: number | null
   /** Customer name captured at order time (optional ledger field). */
   customer_name: string | null
+  /** 'Standard' (in-stock sale) or 'Pre-order' (customer pre-order). */
+  order_type: OrderType | null
   created_at: string
   /** Joined via `product:products(name)`; null when the product is gone. */
   product: { name: string } | null
@@ -62,6 +67,7 @@ interface OrderForm {
   quantity: string
   platform: Platform
   status: OrderStatus
+  orderType: OrderType
 }
 
 /** Summary card descriptor. */
@@ -89,8 +95,15 @@ const statusStyles: Record<string, string> = {
   Cancelled: 'bg-slate-100 text-slate-700',
 }
 
+/** Tailwind badge classes per order type (with fallback for unknown values). */
+const orderTypeStyles: Record<string, string> = {
+  Standard: 'bg-slate-100 text-slate-700',
+  'Pre-order': 'bg-indigo-100 text-indigo-700',
+}
+
 const platforms: Platform[] = ['Shopee', 'Lazada', 'FB']
 const statuses: OrderStatus[] = ['Pending', 'Shipped', 'Delivered', 'Completed', 'Cancelled']
+const orderTypes: OrderType[] = ['Standard', 'Pre-order']
 
 /** Rolling expiry window: orders older than this are auto-deleted. */
 const EXPIRY_DAYS = 30
@@ -102,6 +115,7 @@ const emptyForm: OrderForm = {
   quantity: '',
   platform: 'Shopee',
   status: 'Pending',
+  orderType: 'Standard',
 }
 
 /** Format a number as Philippine pesos. */
@@ -324,6 +338,7 @@ export default function Orders() {
     const headers = [
       'Order ID',
       'Platform',
+      'Order Type',
       'Customer Name',
       'Product Name',
       'Quantity',
@@ -336,6 +351,7 @@ export default function Orders() {
       [
         order.id,
         order.platform,
+        order.order_type ?? 'Standard',
         order.customer_name ?? '',
         order.product?.name ?? '',
         order.quantity ?? '',
@@ -402,6 +418,9 @@ export default function Orders() {
       status: (statuses as string[]).includes(order.status)
         ? (order.status as OrderStatus)
         : 'Pending',
+      orderType: (orderTypes as string[]).includes(order.order_type ?? '')
+        ? (order.order_type as OrderType)
+        : 'Standard',
     })
     setEditingOrder(order)
     setFormError(null)
@@ -466,6 +485,7 @@ export default function Orders() {
           quantity,
           total_amount: total,
           customer_name: form.customerName.trim() || null,
+          order_type: form.orderType,
         })
         .eq('id', editingOrder.id)
         .select('*, product:products(name)')
@@ -504,6 +524,7 @@ export default function Orders() {
           quantity,
           total_amount: total,
           customer_name: form.customerName.trim() || null,
+          order_type: form.orderType,
         },
       ])
       if (insertError) {
@@ -704,6 +725,9 @@ export default function Orders() {
                 Platform
               </th>
               <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Order Type
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Customer
               </th>
               <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -726,7 +750,7 @@ export default function Orders() {
           <tbody className="divide-y divide-slate-100">
             {loading && (
               <tr>
-                <td colSpan={8} className="px-6 py-12 text-center">
+                <td colSpan={9} className="px-6 py-12 text-center">
                   <Loader2 className="mx-auto h-6 w-6 animate-spin text-indigo-600" />
                 </td>
               </tr>
@@ -734,7 +758,7 @@ export default function Orders() {
             {!loading && orders.length === 0 && (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={9}
                   className="px-6 py-12 text-center text-sm text-slate-500"
                 >
                   No orders yet — add your first one!
@@ -744,7 +768,7 @@ export default function Orders() {
             {!loading && orders.length > 0 && filteredOrders.length === 0 && (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={9}
                   className="px-6 py-12 text-center text-sm text-slate-500"
                 >
                   No orders match the selected filters.
@@ -762,6 +786,13 @@ export default function Orders() {
                       className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${platformStyles[order.platform] ?? 'bg-slate-100 text-slate-700'}`}
                     >
                       {order.platform}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${orderTypeStyles[order.order_type ?? 'Standard'] ?? 'bg-slate-100 text-slate-700'}`}
+                    >
+                      {order.order_type ?? 'Standard'}
                     </span>
                   </td>
                   <td className="px-6 py-4 text-sm text-slate-500">
@@ -905,6 +936,28 @@ export default function Orders() {
                     ))}
                   </select>
                 </div>
+              </div>
+
+              {/* Order Type (directly below the Platform dropdown) */}
+              <div className="mb-4">
+                <label
+                  htmlFor="orderType"
+                  className="mb-1 block text-sm font-medium text-slate-700"
+                >
+                  Order Type
+                </label>
+                <select
+                  id="orderType"
+                  value={form.orderType}
+                  onChange={(e) => handleChange('orderType', e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                >
+                  {orderTypes.map((orderType) => (
+                    <option key={orderType} value={orderType}>
+                      {orderType}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {/* Customer Name (optional) */}

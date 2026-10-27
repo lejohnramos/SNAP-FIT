@@ -50,6 +50,8 @@ create table if not exists orders (
   id           uuid primary key default gen_random_uuid(),
   platform     text not null
                check (platform in ('Shopee', 'Lazada', 'FB')),
+  order_type   text not null default 'Standard'
+               check (order_type in ('Standard', 'Pre-order')),
   status       text not null,                       -- e.g. 'Pending', 'Shipped', 'Completed'
   product_id   uuid references products (id) on delete set null,
   quantity     integer not null default 1
@@ -77,6 +79,27 @@ create index if not exists idx_orders_product on orders (product_id);
 -- ------------------------------------------------------------
 alter table orders
   add column if not exists customer_name text;
+
+-- ------------------------------------------------------------
+-- 3c. MIGRATION for existing databases: add order_type to orders
+--     (Distinguishes 'Standard' stock sales from 'Pre-order' sales.
+--     Idempotent - run once in the Supabase SQL Editor. Existing
+--     rows are backfilled with 'Standard'.)
+-- ------------------------------------------------------------
+alter table orders
+  add column if not exists order_type text not null default 'Standard';
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'orders_order_type_check'
+  ) then
+    alter table orders
+      add constraint orders_order_type_check
+      check (order_type in ('Standard', 'Pre-order'));
+  end if;
+end $$;
 
 -- ------------------------------------------------------------
 -- 4. PURCHASE ORDERS
