@@ -6,8 +6,6 @@ import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
 import Inventory from './pages/Inventory'
 import Orders from './pages/Orders'
-import Procurement from './pages/Procurement'
-import Suppliers from './pages/Suppliers'
 import Reports from './pages/Reports'
 
 /**
@@ -30,8 +28,6 @@ export default function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/inventory" element={<Inventory />} />
           <Route path="/orders" element={<Orders />} />
-          <Route path="/procurement" element={<Procurement />} />
-          <Route path="/suppliers" element={<Suppliers />} />
           <Route path="/reports" element={<Reports />} />
         </Route>
       </Route>

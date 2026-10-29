@@ -2,12 +2,10 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import {
   BarChart3,
   Boxes,
-  Building2,
   LayoutDashboard,
   LogOut,
   Package,
   ShoppingCart,
-  Truck,
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -16,8 +14,6 @@ const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/inventory', label: 'Inventory', icon: Package },
   { to: '/orders', label: 'Orders', icon: ShoppingCart },
-  { to: '/procurement', label: 'Procurement', icon: Truck },
-  { to: '/suppliers', label: 'Suppliers', icon: Building2 },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
 ]
 

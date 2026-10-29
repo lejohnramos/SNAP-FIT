@@ -1,27 +1,25 @@
 -- ============================================================
--- Snap-Fit Collectibles — Inventory & Procurement System
+-- Snap-Fit Collectibles — B2B Platform Sync System
 -- Supabase (PostgreSQL) schema
 --
 -- Run this in the Supabase SQL Editor (Dashboard → SQL Editor).
 -- ============================================================
 
 -- ------------------------------------------------------------
--- 1. SUPPLIERS
---    Master list of vendors the business buys collectibles from.
+-- 1. CUSTOMERS
+--    B2B customer master list. Orders link to customers by id
+--    via the orders.customer_id foreign key.
 -- ------------------------------------------------------------
-create table if not exists suppliers (
-  id                 uuid primary key default gen_random_uuid(),
-  name               text not null,
-  contact_info       text,                          -- email / phone / address, etc.
-  performance_rating numeric(3, 2)                  -- 0.00 - 5.00 star rating
-                     check (performance_rating >= 0 and performance_rating <= 5),
-  created_at         timestamptz not null default now()
+create table if not exists customers (
+  id           uuid primary key default gen_random_uuid(),
+  name         text not null,
+  contact_info text,                            -- email / phone / address, etc.
+  created_at   timestamptz not null default now()
 );
 
 -- ------------------------------------------------------------
 -- 2. PRODUCTS
---    Collectible items in the inventory. Each product can be
---    linked to a supplier for restocking (nullable FK).
+--    Collectible items in the inventory.
 -- ------------------------------------------------------------
 create table if not exists products (
   id              uuid primary key default gen_random_uuid(),
@@ -36,7 +34,6 @@ create table if not exists products (
                   check (reorder_point >= 0),
   cost            numeric(12, 2),                   -- buying price (PHP)
   price           numeric(12, 2),                   -- selling price (PHP)
-  supplier_id     uuid references suppliers (id) on delete set null,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );
@@ -44,7 +41,8 @@ create table if not exists products (
 -- ------------------------------------------------------------
 -- 3. ORDERS
 --    Customer sales orders received through the platforms:
---    'Shopee', 'Lazada', or 'FB' (Facebook).
+--    'Shopee', 'Lazada', or 'FB' (Facebook). Each order links to a
+--    customer from the customers table via customer_id (nullable FK).
 -- ------------------------------------------------------------
 create table if not exists orders (
   id           uuid primary key default gen_random_uuid(),
@@ -53,6 +51,7 @@ create table if not exists orders (
   order_type   text not null default 'Standard'
                check (order_type in ('Standard', 'Pre-order')),
   status       text not null,                       -- e.g. 'Pending', 'Shipped', 'Completed'
+  customer_id  uuid references customers (id) on delete set null,
   product_id   uuid references products (id) on delete set null,
   quantity     integer not null default 1
                check (quantity > 0),
@@ -73,12 +72,13 @@ alter table orders
 create index if not exists idx_orders_product on orders (product_id);
 
 -- ------------------------------------------------------------
--- 3b. MIGRATION for existing databases: add customer_name to orders
---     (lets the Order History Ledger search and export customer names.
---     Idempotent - run once in the Supabase SQL Editor).
+-- 3b. MIGRATION for existing databases: add customer_id to orders
+--     (links each order to a customer from the customers table,
+--     replacing the old free-text customer_name field. Idempotent -
+--     run once in the Supabase SQL Editor.)
 -- ------------------------------------------------------------
 alter table orders
-  add column if not exists customer_name text;
+  add column if not exists customer_id uuid references customers (id) on delete set null;
 
 -- ------------------------------------------------------------
 -- 3c. MIGRATION for existing databases: add order_type to orders
@@ -102,41 +102,59 @@ begin
 end $$;
 
 -- ------------------------------------------------------------
--- 4. PURCHASE ORDERS
---    Restock orders placed with suppliers.
+-- 4. TRANSACTIONS (formerly stock_movements)
+--    Audit log of every sales event for a product. Renamed from
+--    `stock_movements` to `transactions` in the B2B Platform Sync
+--    architecture.
+--    sales is positive for stock-in, negative for stock-out.
+--    user_id references Supabase Auth users (auth.users).
 -- ------------------------------------------------------------
-create table if not exists purchase_orders (
+create table if not exists transactions (
   id          uuid primary key default gen_random_uuid(),
-  supplier_id uuid not null references suppliers (id) on delete cascade,
-  status      text not null default 'pending',      -- e.g. 'pending', 'shipped', 'received'
-  total_cost  numeric(12, 2) not null default 0,
+  product_id  uuid not null references products (id) on delete cascade,
+  user_id     uuid references auth.users (id) on delete set null,
+  sales       integer not null
+              check (sales <> 0),
+  reason      text,                            -- e.g. 'Sale', 'Restock', 'Damage'
   created_at  timestamptz not null default now()
 );
 
 -- ------------------------------------------------------------
--- 5. STOCK MOVEMENTS
---    Audit log of every stock in/out event for a product.
---    quantity_changed is positive for stock-in, negative for stock-out.
---    user_id references Supabase Auth users (auth.users).
+-- 4a. MIGRATION for existing databases: rename the legacy
+--     `stock_movements` table to `transactions` and its
+--     `quantity_changed` column to `sales`. Idempotent - run once
+--     in the Supabase SQL Editor. (Skipped automatically if the
+--     transactions table already exists.)
 -- ------------------------------------------------------------
-create table if not exists stock_movements (
-  id               uuid primary key default gen_random_uuid(),
-  product_id       uuid not null references products (id) on delete cascade,
-  user_id          uuid references auth.users (id) on delete set null,
-  quantity_changed integer not null
-                   check (quantity_changed <> 0),
-  reason           text,                            -- e.g. 'Sale', 'Restock', 'Damage'
-  created_at       timestamptz not null default now()
-);
+do $$
+begin
+  if not exists (
+    select 1 from pg_tables where tablename = 'transactions'
+  ) then
+    alter table stock_movements rename to transactions;
+    alter table transactions
+      rename column quantity_changed to sales;
+  end if;
+end $$;
+
+-- ------------------------------------------------------------
+-- 4b. MIGRATION for existing databases: drop the removed
+--     `purchase_orders` and `suppliers` tables (and the legacy
+--     products.supplier_id column) since the Procurement module
+--     has been removed. Idempotent - run once in the Supabase
+--     SQL Editor.
+-- ------------------------------------------------------------
+drop table if exists purchase_orders;
+drop table if exists suppliers cascade;
+alter table products drop column if exists supplier_id;
 
 -- ------------------------------------------------------------
 -- Indexes for the most common lookups / joins
 -- ------------------------------------------------------------
-create index if not exists idx_products_supplier on products (supplier_id);
 create index if not exists idx_orders_platform on orders (platform);
 create index if not exists idx_orders_created_at on orders (created_at desc);
-create index if not exists idx_purchase_orders_supplier on purchase_orders (supplier_id);
-create index if not exists idx_stock_movements_product on stock_movements (product_id);
+create index if not exists idx_orders_customer on orders (customer_id);
+create index if not exists idx_transactions_product on transactions (product_id);
 
 -- ------------------------------------------------------------
 -- Row Level Security (RLS)
@@ -144,14 +162,13 @@ create index if not exists idx_stock_movements_product on stock_movements (produ
 --    full access for authenticated users only; tighten them to
 --    role-specific policies before going to production.
 -- ------------------------------------------------------------
-alter table suppliers enable row level security;
+alter table customers enable row level security;
 alter table products enable row level security;
 alter table orders enable row level security;
-alter table purchase_orders enable row level security;
-alter table stock_movements enable row level security;
+alter table transactions enable row level security;
 
-create policy "authenticated_users_full_access_suppliers"
-  on suppliers for all to authenticated
+create policy "authenticated_users_full_access_customers"
+  on customers for all to authenticated
   using (true) with check (true);
 
 create policy "authenticated_users_full_access_products"
@@ -162,12 +179,8 @@ create policy "authenticated_users_full_access_orders"
   on orders for all to authenticated
   using (true) with check (true);
 
-create policy "authenticated_users_full_access_purchase_orders"
-  on purchase_orders for all to authenticated
-  using (true) with check (true);
-
-create policy "authenticated_users_full_access_stock_movements"
-  on stock_movements for all to authenticated
+create policy "authenticated_users_full_access_transactions"
+  on transactions for all to authenticated
   using (true) with check (true);
 
 -- ------------------------------------------------------------

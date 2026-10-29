@@ -37,13 +37,15 @@ interface OrderRow {
   total_amount: number
   product_id: string | null
   quantity: number | null
-  /** Customer name captured at order time (optional ledger field). */
-  customer_name: string | null
+  /** FK to the customers table; null when no customer is linked. */
+  customer_id: string | null
   /** 'Standard' (in-stock sale) or 'Pre-order' (customer pre-order). */
   order_type: OrderType | null
   created_at: string
   /** Joined via `product:products(name)`; null when the product is gone. */
   product: { name: string } | null
+  /** Joined via `customer:customers(name)`; null when the customer is gone. */
+  customer: { name: string } | null
 }
 
 /** Minimal shape of the rows fetched by the 30-day expiry cleanup. */
@@ -61,9 +63,15 @@ interface ProductOption {
   stock_level: number
 }
 
+/** Minimal customer shape used by the order form dropdown. */
+interface CustomerOption {
+  id: string
+  name: string
+}
+
 /** State for the New Order modal form. */
 interface OrderForm {
-  customerName: string
+  customerId: string
   productId: string
   quantity: string
   platform: Platform
@@ -111,7 +119,7 @@ const EXPIRY_DAYS = 30
 
 /** Blank form state used to (re)initialize the modal. */
 const emptyForm: OrderForm = {
-  customerName: '',
+  customerId: '',
   productId: '',
   quantity: '',
   platform: 'Shopee',
@@ -136,6 +144,7 @@ const formatPeso = (value: number) =>
 export default function Orders() {
   const [orders, setOrders] = useState<OrderRow[]>([])
   const [products, setProducts] = useState<ProductOption[]>([])
+  const [customers, setCustomers] = useState<CustomerOption[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   /** Non-critical info banner (e.g. 30-day expiry cleanup results). */
@@ -227,7 +236,7 @@ export default function Orders() {
   const fetchOrders = useCallback(async () => {
     const { data, error: fetchError } = await supabase
       .from('orders')
-      .select('*, product:products(name)')
+      .select('*, product:products(name), customer:customers(name)')
       .order('created_at', { ascending: false })
       .limit(1000)
     if (fetchError) {
@@ -250,26 +259,39 @@ export default function Orders() {
     }
   }, [])
 
-  // Load orders and products once on mount, after rolling the 30-day expiry.
+  /** Fetch the customer list used by the order form dropdown. */
+  const fetchCustomers = useCallback(async () => {
+    const { data, error: fetchError } = await supabase
+      .from('customers')
+      .select('id, name')
+      .order('name', { ascending: true })
+    if (fetchError) {
+      setError(fetchError.message)
+    } else {
+      setCustomers((data as CustomerOption[]) ?? [])
+    }
+  }, [])
+
+  // Load orders, products, and customers once on mount, after rolling the 30-day expiry.
   useEffect(() => {
     const init = async () => {
       setLoading(true)
       setError(null)
       // Auto-expire old Pending/Cancelled orders before loading the ledger.
       await runOrderExpiry()
-      await Promise.all([fetchOrders(), fetchProducts()])
+      await Promise.all([fetchOrders(), fetchProducts(), fetchCustomers()])
       setLoading(false)
     }
     void init()
-  }, [fetchOrders, fetchProducts, runOrderExpiry])
+  }, [fetchOrders, fetchProducts, fetchCustomers, runOrderExpiry])
 
-  /** Re-run both fetches after a failure ("Try Again"). */
+  /** Re-run all fetches after a failure ("Try Again"). */
   const handleRetry = useCallback(async () => {
     setLoading(true)
     setError(null)
-    await Promise.all([fetchOrders(), fetchProducts()])
+    await Promise.all([fetchOrders(), fetchProducts(), fetchCustomers()])
     setLoading(false)
-  }, [fetchOrders, fetchProducts])
+  }, [fetchOrders, fetchProducts, fetchCustomers])
 
   // Derived: key metrics computed from the full (unfiltered) list.
   const totalOrders = orders.length
@@ -315,7 +337,7 @@ export default function Orders() {
       // Search by customer name or order ID.
       if (term) {
         const matchesId = order.id.toLowerCase().includes(term)
-        const matchesCustomer = (order.customer_name ?? '').toLowerCase().includes(term)
+        const matchesCustomer = (order.customer?.name ?? '').toLowerCase().includes(term)
         if (!matchesId && !matchesCustomer) return false
       }
       return true
@@ -353,7 +375,7 @@ export default function Orders() {
         order.id,
         order.platform,
         order.order_type ?? 'Standard',
-        order.customer_name ?? '',
+        order.customer?.name ?? '',
         order.product?.name ?? '',
         order.quantity ?? '',
         order.status,
@@ -410,7 +432,7 @@ export default function Orders() {
   /** Open the modal pre-filled with an existing order's data. */
   const openEditModal = (order: OrderRow) => {
     setForm({
-      customerName: order.customer_name ?? '',
+      customerId: order.customer_id ?? '',
       productId: order.product_id ?? '',
       quantity: order.quantity === null ? '' : String(order.quantity),
       platform: (platforms as string[]).includes(order.platform)
@@ -485,11 +507,11 @@ export default function Orders() {
           product_id: form.productId,
           quantity,
           total_amount: total,
-          customer_name: form.customerName.trim() || null,
+          customer_id: form.customerId || null,
           order_type: form.orderType,
         })
         .eq('id', editingOrder.id)
-        .select('*, product:products(name)')
+        .select('*, product:products(name), customer:customers(name)')
         .single()
       if (updateError) {
         setSaving(false)
@@ -524,7 +546,7 @@ export default function Orders() {
           product_id: form.productId,
           quantity,
           total_amount: total,
-          customer_name: form.customerName.trim() || null,
+          customer_id: form.customerId || null,
           order_type: form.orderType,
         },
       ])
@@ -799,7 +821,7 @@ export default function Orders() {
                     </span>
                   </td>
                   <td className="px-6 py-4 text-sm text-slate-500">
-                    {order.customer_name ?? '—'}
+                    {order.customer?.name ?? '—'}
                   </td>
                   <td className="px-6 py-4 text-sm font-medium text-slate-900">
                     {order.product?.name ?? '—'}
@@ -973,22 +995,27 @@ export default function Orders() {
                 </select>
               </div>
 
-              {/* Customer Name (optional) */}
+              {/* Customer (optional, from the customers table) */}
               <div className="mb-4">
                 <label
-                  htmlFor="customerName"
+                  htmlFor="customer"
                   className="mb-1 block text-sm font-medium text-slate-700"
                 >
-                  Customer Name <span className="font-normal text-slate-400">(optional)</span>
+                  Customer <span className="font-normal text-slate-400">(optional)</span>
                 </label>
-                <input
-                  id="customerName"
-                  type="text"
-                  value={form.customerName}
-                  onChange={(e) => handleChange('customerName', e.target.value)}
-                  placeholder="e.g. Juan Dela Cruz"
+                <select
+                  id="customer"
+                  value={form.customerId}
+                  onChange={(e) => handleChange('customerId', e.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                />
+                >
+                  <option value="">Select a customer…</option>
+                  {customers.map((customer) => (
+                    <option key={customer.id} value={customer.id}>
+                      {customer.name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {/* Status */}
