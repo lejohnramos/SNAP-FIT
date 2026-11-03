@@ -9,6 +9,7 @@ import {
   Users,
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import logo from '../assets/logo.jpg'
 
 /** Sidebar navigation items with their Lucide icons. */
 const navItems = [
@@ -35,9 +36,7 @@ export default function Sidebar() {
     <aside className="flex w-64 shrink-0 flex-col bg-slate-900">
       {/* Logo area */}
       <div className="flex items-center gap-3 px-6 py-6">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-600">
-          <Boxes className="h-6 w-6 text-white" />
-        </div>
+        <img src={logo} alt="Snap-Fit Logo" className="w-10 h-10 object-contain rounded" />
         <div>
           <h1 className="text-base font-bold leading-tight text-white">
             Snap-Fit
