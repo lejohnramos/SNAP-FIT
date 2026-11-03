@@ -1,7 +1,6 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   BarChart3,
-  Boxes,
   LayoutDashboard,
   LogOut,
   Package,
