@@ -7,6 +7,8 @@ import Dashboard from './pages/Dashboard'
 import Inventory from './pages/Inventory'
 import Orders from './pages/Orders'
 import Reports from './pages/Reports'
+import Users from './pages/Users'
+import { useAuth } from './contexts/AuthContext'
 
 /**
  * Application routes.
@@ -15,6 +17,14 @@ import Reports from './pages/Reports'
  * - Everything else is wrapped in ProtectedRoute, which requires a
  *   Supabase session and renders pages inside the shared Layout.
  */
+function AdminRoute({ children }: { children: React.ReactElement }) {
+  const { role } = useAuth()
+  if (role !== 'Admin') {
+    return <Navigate to="/" replace />
+  }
+  return children
+}
+
 export default function App() {
   return (
     <Routes>
@@ -29,6 +39,14 @@ export default function App() {
           <Route path="/inventory" element={<Inventory />} />
           <Route path="/orders" element={<Orders />} />
           <Route path="/reports" element={<Reports />} />
+          <Route
+            path="/users"
+            element={
+              <AdminRoute>
+                <Users />
+              </AdminRoute>
+            }
+          />
         </Route>
       </Route>
 

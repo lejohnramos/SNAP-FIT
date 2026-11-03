@@ -18,6 +18,8 @@ interface AuthResult {
 interface AuthContextValue {
   session: Session | null
   user: User | null
+  role: string | null
+  isActive: boolean | null
   /** True while the initial session is being restored from storage. */
   loading: boolean
   signIn: (email: string, password: string) => Promise<AuthResult>
@@ -40,13 +42,42 @@ function toMessage(err: { message: string } | null): string | null {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [user, setUser] = useState<User | null>(null)
+  const [role, setRole] = useState<string | null>(null)
+  const [isActive, setIsActive] = useState<boolean | null>(null)
   const [loading, setLoading] = useState(true)
+
+  const fetchUserProfile = async (authUser: User | null) => {
+    if (!authUser) {
+      setRole(null)
+      setIsActive(null)
+      return
+    }
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('role, is_active')
+        .eq('id', authUser.id)
+        .single()
+      if (!error && data) {
+        setRole(data.role ?? null)
+        setIsActive(data.is_active ?? null)
+      } else {
+        setRole(null)
+        setIsActive(null)
+      }
+    } catch {
+      setRole(null)
+      setIsActive(null)
+    }
+  }
 
   useEffect(() => {
     // Restore any existing session (persisted by supabase-js).
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
-      setUser(data.session?.user ?? null)
+      const authUser = data.session?.user ?? null
+      setUser(authUser)
+      void fetchUserProfile(authUser)
       setLoading(false)
     })
 
@@ -55,7 +86,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession)
-      setUser(newSession?.user ?? null)
+      const authUser = newSession?.user ?? null
+      setUser(authUser)
+      void fetchUserProfile(authUser)
     })
 
     return () => subscription.unsubscribe()
@@ -75,10 +108,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     await supabase.auth.signOut()
+    setRole(null)
+    setIsActive(null)
   }
 
   return (
-    <AuthContext.Provider value={{ session, user, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ session, user, role, isActive, loading, signIn, signUp, signOut }}>
       {children}
     </AuthContext.Provider>
   )
