@@ -17,7 +17,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { supabase } from '../lib/supabase'
 
 /** Recognized sales platforms (mirrors the schema CHECK constraint). */
-type Platform = 'Shopee' | 'Lazada' | 'FB'
+type Platform = 'Shopee' | 'Lazada' | 'Facebook' | 'Other'
 
 /** Recognized order statuses shown in the app. */
 type OrderStatus = 'Pending' | 'Shipped' | 'Delivered' | 'Completed' | 'Cancelled'
@@ -92,7 +92,9 @@ interface SummaryCard {
 const platformStyles: Record<string, string> = {
   Shopee: 'bg-orange-100 text-orange-700',
   Lazada: 'bg-blue-100 text-blue-700',
+  Facebook: 'bg-purple-100 text-purple-700',
   FB: 'bg-purple-100 text-purple-700',
+  Other: 'bg-slate-100 text-slate-700',
 }
 
 /** Tailwind badge classes per order status (with fallback for unknown values). */
@@ -110,7 +112,7 @@ const orderTypeStyles: Record<string, string> = {
   'Pre-order': 'bg-indigo-100 text-indigo-700',
 }
 
-const platforms: Platform[] = ['Shopee', 'Lazada', 'FB']
+const platforms: Platform[] = ['Shopee', 'Lazada', 'Facebook', 'Other']
 const statuses: OrderStatus[] = ['Pending', 'Shipped', 'Delivered', 'Completed', 'Cancelled']
 const orderTypes: OrderType[] = ['Standard', 'Pre-order']
 
