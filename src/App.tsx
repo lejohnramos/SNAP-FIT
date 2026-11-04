@@ -8,6 +8,7 @@ import Inventory from './pages/Inventory'
 import Orders from './pages/Orders'
 import Reports from './pages/Reports'
 import Users from './pages/Users'
+import MockTesting from './pages/MockTesting'
 import { useAuth } from './contexts/AuthContext'
 
 /**
@@ -39,6 +40,7 @@ export default function App() {
           <Route path="/inventory" element={<Inventory />} />
           <Route path="/orders" element={<Orders />} />
           <Route path="/reports" element={<Reports />} />
+          <Route path="/testing" element={<MockTesting />} />
           <Route
             path="/users"
             element={

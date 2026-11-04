@@ -1,6 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   BarChart3,
+  FlaskConical,
   LayoutDashboard,
   LogOut,
   Package,
@@ -79,6 +80,20 @@ export default function Sidebar() {
             Users
           </NavLink>
         )}
+        <NavLink
+          key="/testing"
+          to="/testing"
+          className={({ isActive }) =>
+            `flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+              isActive
+                ? 'bg-indigo-600 text-white'
+                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+            }`
+          }
+        >
+          <FlaskConical className="h-5 w-5" />
+          Testing
+        </NavLink>
       </nav>
 
       {/* Footer: signed-in user + sign out */}
