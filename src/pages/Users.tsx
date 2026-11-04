@@ -71,8 +71,17 @@ export default function Users() {
     setUpdating(null)
   }
 
-  const canEditRole = () => {
-    return currentRole === 'Super Admin'
+  const canEditRole = (targetUser: UserRow) => {
+    if (!currentUser || !currentRole) return false
+    if (targetUser.id === currentUser.id) return false // Self-protection
+    if (currentRole === 'Super Admin') {
+      // Super Admin can change others' roles, but cannot assign Super Admin
+      return targetUser.role !== 'Super Admin'
+    }
+    if (currentRole === 'Admin') {
+      return false // Admin cannot change any roles
+    }
+    return false
   }
 
   const isOwnRow = (userId: string) => {
@@ -91,6 +100,13 @@ export default function Users() {
       return targetUser.role === 'Staff'
     }
     return false
+  }
+
+  const getRoleTooltip = (targetUser: UserRow) => {
+    if (targetUser.id === currentUser?.id) return 'Cannot change your own role.'
+    if (currentRole === 'Admin') return 'Admins cannot change roles.'
+    if (currentRole === 'Super Admin' && targetUser.role === 'Super Admin') return 'Cannot assign Super Admin role.'
+    return ''
   }
 
   const getDeactivateTooltip = (targetUser: UserRow) => {
@@ -178,9 +194,9 @@ export default function Users() {
                     {user.email}
                   </td>
                   <td className="px-6 py-4">
-                    {canEditRole() && !isOwnRow(user.id) ? (
+                    {canEditRole(user) ? (
                       <select
-                        value={user.role === 'Super Admin' ? 'Admin' : user.role}
+                        value={user.role}
                         onChange={(e) => void updateRole(user.id, e.target.value)}
                         disabled={updating === user.id}
                         className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
@@ -191,7 +207,7 @@ export default function Users() {
                     ) : (
                       <span
                         className="text-sm text-slate-700"
-                        title={!canEditRole() ? 'Only the Super Admin has permission to modify user roles.' : ''}
+                        title={getRoleTooltip(user)}
                       >
                         {user.role}
                         {isOwnRow(user.id) && <span className="ml-1 text-slate-500">(You)</span>}
