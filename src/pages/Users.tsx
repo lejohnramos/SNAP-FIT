@@ -37,6 +37,7 @@ export default function Users() {
   }, [fetchUsers])
 
   const updateRole = async (userId: string, role: string) => {
+    if (currentRole !== 'Super Admin') return
     setUpdating(userId)
     const { error: updateError } = await supabase
       .from('users')
@@ -70,25 +71,8 @@ export default function Users() {
     setUpdating(null)
   }
 
-  const canEditRole = (targetUser: UserRow) => {
-    if (!currentUser) return false
-    if (targetUser.id === currentUser.id) return false // Self-protection
-    if (currentRole === 'Super Admin') return true
-    if (currentRole === 'Admin') {
-      // Admin can only manage Staff
-      if (targetUser.role === 'Staff') return true
-      return false
-    }
-    return false
-  }
-
-  const getRoleTooltip = (targetUser: UserRow) => {
-    if (!currentUser) return ''
-    if (targetUser.id === currentUser.id) return '(You)'
-    if (currentRole === 'Admin' && targetUser.role !== 'Staff') {
-      return 'Only the Super Admin can manage Admin accounts.'
-    }
-    return ''
+  const canEditRole = () => {
+    return currentRole === 'Super Admin'
   }
 
   return (
@@ -109,6 +93,12 @@ export default function Users() {
           Refresh
         </button>
       </div>
+
+      {currentRole !== 'Super Admin' && (
+        <div className="mb-6 rounded-xl bg-amber-50 px-6 py-4 text-sm text-amber-700 ring-1 ring-amber-200">
+          Only the Super Admin has permission to modify user roles.
+        </div>
+      )}
 
       {error && (
         <div className="mb-6 rounded-xl bg-red-50 px-6 py-4 text-sm text-red-700">
@@ -159,29 +149,17 @@ export default function Users() {
                     {user.email}
                   </td>
                   <td className="px-6 py-4">
-                    {canEditRole(user) ? (
-                      <select
-                        value={user.role}
-                        onChange={(e) => void updateRole(user.id, e.target.value)}
-                        disabled={updating === user.id}
-                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
-                      >
-                        <option value="Super Admin">Super Admin</option>
-                        <option value="Admin">Admin</option>
-                        <option value="Staff">Staff</option>
-                      </select>
-                    ) : (
-                      <span
-                        className="text-sm text-slate-700"
-                        title={getRoleTooltip(user)}
-                      >
-                        {user.role}
-                        {user.id === currentUser?.id && <span className="ml-1 text-slate-500">(You)</span>}
-                        {user.id !== currentUser?.id && currentRole === 'Admin' && user.role !== 'Staff' && (
-                          <span className="ml-1 text-xs text-slate-400" title="Only the Super Admin can manage Admin accounts.">🔒</span>
-                        )}
-                      </span>
-                    )}
+                    <select
+                      value={user.role}
+                      onChange={(e) => void updateRole(user.id, e.target.value)}
+                      disabled={!canEditRole() || updating === user.id}
+                      title={!canEditRole() ? 'Only the Super Admin has permission to modify user roles.' : ''}
+                      className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <option value="Super Admin">Super Admin</option>
+                      <option value="Admin">Admin</option>
+                      <option value="Staff">Staff</option>
+                    </select>
                   </td>
                   <td className="px-6 py-4">
                     <span
