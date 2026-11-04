@@ -75,6 +75,10 @@ export default function Users() {
     return currentRole === 'Super Admin'
   }
 
+  const isOwnRow = (userId: string) => {
+    return currentUser?.id === userId
+  }
+
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
@@ -149,17 +153,25 @@ export default function Users() {
                     {user.email}
                   </td>
                   <td className="px-6 py-4">
-                    <select
-                      value={user.role}
-                      onChange={(e) => void updateRole(user.id, e.target.value)}
-                      disabled={!canEditRole() || updating === user.id}
-                      title={!canEditRole() ? 'Only the Super Admin has permission to modify user roles.' : ''}
-                      className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <option value="Super Admin">Super Admin</option>
-                      <option value="Admin">Admin</option>
-                      <option value="Staff">Staff</option>
-                    </select>
+                    {canEditRole() && !isOwnRow(user.id) ? (
+                      <select
+                        value={user.role === 'Super Admin' ? 'Admin' : user.role}
+                        onChange={(e) => void updateRole(user.id, e.target.value)}
+                        disabled={updating === user.id}
+                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <option value="Admin">Admin</option>
+                        <option value="Staff">Staff</option>
+                      </select>
+                    ) : (
+                      <span
+                        className="text-sm text-slate-700"
+                        title={!canEditRole() ? 'Only the Super Admin has permission to modify user roles.' : ''}
+                      >
+                        {user.role}
+                        {isOwnRow(user.id) && <span className="ml-1 text-slate-500">(You)</span>}
+                      </span>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     <span
