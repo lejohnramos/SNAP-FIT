@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Loader2, RefreshCw } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../contexts/AuthContext'
 
 interface UserRow {
   id: string
@@ -10,6 +11,7 @@ interface UserRow {
 }
 
 export default function Users() {
+  const { user: currentUser, role: currentRole } = useAuth()
   const [users, setUsers] = useState<UserRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -66,6 +68,27 @@ export default function Users() {
       )
     }
     setUpdating(null)
+  }
+
+  const canEditRole = (targetUser: UserRow) => {
+    if (!currentUser) return false
+    if (targetUser.id === currentUser.id) return false // Self-protection
+    if (currentRole === 'Super Admin') return true
+    if (currentRole === 'Admin') {
+      // Admin can only manage Staff
+      if (targetUser.role === 'Staff') return true
+      return false
+    }
+    return false
+  }
+
+  const getRoleTooltip = (targetUser: UserRow) => {
+    if (!currentUser) return ''
+    if (targetUser.id === currentUser.id) return '(You)'
+    if (currentRole === 'Admin' && targetUser.role !== 'Staff') {
+      return 'Only the Super Admin can manage Admin accounts.'
+    }
+    return ''
   }
 
   return (
@@ -136,15 +159,29 @@ export default function Users() {
                     {user.email}
                   </td>
                   <td className="px-6 py-4">
-                    <select
-                      value={user.role}
-                      onChange={(e) => void updateRole(user.id, e.target.value)}
-                      disabled={updating === user.id}
-                      className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
-                    >
-                      <option value="Admin">Admin</option>
-                      <option value="Staff">Staff</option>
-                    </select>
+                    {canEditRole(user) ? (
+                      <select
+                        value={user.role}
+                        onChange={(e) => void updateRole(user.id, e.target.value)}
+                        disabled={updating === user.id}
+                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
+                      >
+                        <option value="Super Admin">Super Admin</option>
+                        <option value="Admin">Admin</option>
+                        <option value="Staff">Staff</option>
+                      </select>
+                    ) : (
+                      <span
+                        className="text-sm text-slate-700"
+                        title={getRoleTooltip(user)}
+                      >
+                        {user.role}
+                        {user.id === currentUser?.id && <span className="ml-1 text-slate-500">(You)</span>}
+                        {user.id !== currentUser?.id && currentRole === 'Admin' && user.role !== 'Staff' && (
+                          <span className="ml-1 text-xs text-slate-400" title="Only the Super Admin can manage Admin accounts.">🔒</span>
+                        )}
+                      </span>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     <span

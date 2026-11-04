@@ -20,7 +20,7 @@ import { useAuth } from './contexts/AuthContext'
  */
 function AdminRoute({ children }: { children: React.ReactElement }) {
   const { role } = useAuth()
-  if (role !== 'Admin') {
+  if (role !== 'Admin' && role !== 'Super Admin') {
     return <Navigate to="/" replace />
   }
   return children
