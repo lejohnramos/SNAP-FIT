@@ -20,13 +20,40 @@ export default function MockTesting() {
       // Get product GUN-001
       const { data: product, error: productError } = await supabase
         .from('products')
-        .select('id, stock_level, price')
+        .select('id, stock_level, price, sku')
         .eq('sku', 'GUN-001')
         .single()
 
       if (productError || !product) {
         showToast('Error: Product GUN-001 not found')
         return
+      }
+
+      const customerName = platform === 'Shopee' ? 'Shopee Buyer' : 'Lazada Buyer'
+
+      // Check for existing customer
+      let { data: customer, error: customerFetchError } = await supabase
+        .from('customers')
+        .select('id')
+        .eq('name', customerName)
+        .maybeSingle()
+
+      if (customerFetchError) {
+        showToast('Error: Failed to fetch customer')
+        return
+      }
+
+      if (!customer) {
+        const { data: newCustomer, error: customerInsertError } = await supabase
+          .from('customers')
+          .insert([{ name: customerName }])
+          .select('id')
+          .single()
+        if (customerInsertError || !newCustomer) {
+          showToast('Error: Failed to create customer')
+          return
+        }
+        customer = newCustomer
       }
 
       const quantity = 1
@@ -38,6 +65,7 @@ export default function MockTesting() {
           platform,
           status: 'Pending',
           product_id: product.id,
+          customer_id: customer.id,
           quantity,
           total_amount: totalAmount,
           order_type: 'Standard',
@@ -68,6 +96,54 @@ export default function MockTesting() {
       else setLoadingLazada(false)
     }
   }
+
+  return (
+    <div>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-slate-900">Developer Testing: API Webhook Simulation</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          Simulate incoming orders from e-commerce platforms for testing.
+        </p>
+      </div>
+
+      {toast && (
+        <div className="mb-6 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-700 ring-1 ring-emerald-200">
+          {toast}
+        </div>
+      )}
+
+      <div className="max-w-md rounded-xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+        <div className="mb-4 flex items-center gap-2">
+          <FlaskConical className="h-5 w-5 text-indigo-600" />
+          <h2 className="text-lg font-semibold text-slate-900">Webhook Simulation</h2>
+        </div>
+        <p className="mb-6 text-sm text-slate-600">
+          Click a button below to simulate a webhook order. This will create an order for SKU GUN-001 and deduct stock.
+        </p>
+        <div className="space-y-3">
+          <button
+            type="button"
+            onClick={() => void simulateOrder('Shopee')}
+            disabled={loadingShopee || loadingLazada}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loadingShopee && <Loader2 className="h-4 w-4 animate-spin" />}
+            {loadingShopee ? 'Simulating...' : 'Simulate Shopee Order'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void simulateOrder('Lazada')}
+            disabled={loadingShopee || loadingLazada}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loadingLazada && <Loader2 className="h-4 w-4 animate-spin" />}
+            {loadingLazada ? 'Simulating...' : 'Simulate Lazada Order'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
   return (
     <div>
