@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
-import { Boxes, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { REMEMBER_ME_KEY } from '../lib/supabase'
+import logo from '../assets/logo.jpg'
 
 /**
  * Login page: authenticates an existing user with Supabase email +
@@ -42,9 +43,7 @@ export default function Login() {
       <div className="w-full max-w-md rounded-xl bg-white p-8 shadow-sm ring-1 ring-slate-200">
         {/* Logo area */}
         <div className="mb-6 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-600">
-            <Boxes className="h-6 w-6 text-white" />
-          </div>
+          <img src={logo} alt="Snap-Fit Logo" className="w-12 h-12 object-contain rounded-lg" />
           <div>
             <h1 className="text-lg font-bold leading-tight text-slate-900">
               Snap-Fit Collectibles
