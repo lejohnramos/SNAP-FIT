@@ -79,6 +79,31 @@ export default function Users() {
     return currentUser?.id === userId
   }
 
+  const canDeactivate = (targetUser: UserRow) => {
+    if (!currentUser || !currentRole) return false
+    if (targetUser.id === currentUser.id) return false // Self-protection
+    if (currentRole === 'Super Admin') {
+      // Super Admin can deactivate Admin and Staff
+      return targetUser.role === 'Admin' || targetUser.role === 'Staff'
+    }
+    if (currentRole === 'Admin') {
+      // Admin can only deactivate Staff
+      return targetUser.role === 'Staff'
+    }
+    return false
+  }
+
+  const getDeactivateTooltip = (targetUser: UserRow) => {
+    if (targetUser.id === currentUser?.id) return 'Cannot deactivate your own account.'
+    if (currentRole === 'Admin' && (targetUser.role === 'Super Admin' || targetUser.role === 'Admin')) {
+      return 'Only Super Admin can manage Admins'
+    }
+    if (currentRole === 'Super Admin' && targetUser.role === 'Super Admin') {
+      return 'Cannot deactivate Super Admin'
+    }
+    return ''
+  }
+
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
@@ -188,8 +213,9 @@ export default function Users() {
                     <button
                       type="button"
                       onClick={() => void toggleStatus(user.id, user.is_active)}
-                      disabled={updating === user.id}
-                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-50 disabled:opacity-50"
+                      disabled={!canDeactivate(user) || updating === user.id}
+                      title={getDeactivateTooltip(user)}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {user.is_active ? 'Deactivate' : 'Activate'}
                     </button>
