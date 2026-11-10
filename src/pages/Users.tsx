@@ -15,7 +15,7 @@ export default function Users() {
   const { user: currentUser, role: currentRole } = useAuth()
   const [users, setUsers] = useState<UserRow[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [_error, setError] = useState<string | null>(null)
   const [updating, setUpdating] = useState<string | null>(null)
   const [nameDrafts, setNameDrafts] = useState<Record<string, string>>({})
 
