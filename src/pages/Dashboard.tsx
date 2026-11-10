@@ -107,7 +107,7 @@ export default function Dashboard() {
     .reduce((sum, o) => sum + (o.total_amount ?? 0), 0)
   const pendingOrders = orders.filter((o) => o.status === 'Pending').length
   const lowStock = products.filter(
-    (p) => p.stock_level <= p.reorder_point,
+    (p) => p.stock_level <= 5 || p.stock_level <= p.reorder_point,
   ).length
   const recentOrders = orders.slice(0, 5)
 

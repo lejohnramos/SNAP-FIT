@@ -522,6 +522,7 @@ export default function Inventory() {
                     type="number"
                     step="0.01"
                     min="0"
+                    max="999999"
                     value={form.cost}
                     onChange={(e) => handleChange('cost', e.target.value)}
                     placeholder="0.00"
@@ -540,6 +541,7 @@ export default function Inventory() {
                     type="number"
                     step="0.01"
                     min="0"
+                    max="999999"
                     value={form.price}
                     onChange={(e) => handleChange('price', e.target.value)}
                     placeholder="0.00"
@@ -561,6 +563,7 @@ export default function Inventory() {
                     id="stockLevel"
                     type="number"
                     min="0"
+                    max="9999"
                     value={form.stockLevel}
                     onChange={(e) => handleChange('stockLevel', e.target.value)}
                     placeholder="0"
@@ -578,6 +581,7 @@ export default function Inventory() {
                     id="reorderPoint"
                     type="number"
                     min="0"
+                    max="9999"
                     value={form.reorderPoint}
                     onChange={(e) =>
                       handleChange('reorderPoint', e.target.value)

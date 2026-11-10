@@ -938,6 +938,7 @@ export default function Orders() {
                     id="quantity"
                     type="number"
                     min="1"
+                    max="99"
                     step="1"
                     value={form.quantity}
                     onChange={(e) => handleChange('quantity', e.target.value)}
