@@ -26,6 +26,7 @@ const navItems = [
 export default function Sidebar() {
   const { user, signOut, role, fullName } = useAuth()
   const navigate = useNavigate()
+  console.log("Current User Role:", role)
 
   const handleSignOut = async () => {
     await signOut()

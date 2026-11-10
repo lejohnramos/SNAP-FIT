@@ -79,22 +79,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     // Restore any existing session (persisted by supabase-js).
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
       setSession(data.session)
       const authUser = data.session?.user ?? null
       setUser(authUser)
-      void fetchUserProfile(authUser)
+      await fetchUserProfile(authUser)
       setLoading(false)
     })
 
     // Keep the context in sync with login/logout/token-refresh events.
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
       setSession(newSession)
       const authUser = newSession?.user ?? null
       setUser(authUser)
-      void fetchUserProfile(authUser)
+      await fetchUserProfile(authUser)
     })
 
     return () => subscription.unsubscribe()
