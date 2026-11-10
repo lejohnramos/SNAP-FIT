@@ -66,7 +66,7 @@ export default function Sidebar() {
             {label}
           </NavLink>
         ))}
-        {role === 'Super Admin' && (
+        {(role === 'Super Admin' || role === 'Admin') && (
           <NavLink
             key="/users"
             to="/users"

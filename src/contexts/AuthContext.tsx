@@ -56,24 +56,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return
     }
     try {
-      const { data, error } = await supabase
+      // First fetch role and is_active (critical for access control)
+      const { data: roleData, error: roleError } = await supabase
         .from('users')
-        .select('role, is_active, full_name')
+        .select('role, is_active')
         .eq('id', authUser.id)
         .single()
-      console.log("Fetched Profile:", data, error)
-      if (!error && data) {
-        setRole(data.role ?? null)
-        setIsActive(data.is_active ?? null)
-        setFullName(data.full_name ?? null)
+
+      console.log("Fetched Profile (role):", roleData, roleError)
+
+      if (!roleError && roleData) {
+        setRole(roleData.role ?? null)
+        setIsActive(roleData.is_active ?? null)
       } else {
+        console.error("Auth Fetch Error (role):", roleError)
         setRole(null)
         setIsActive(null)
+      }
+
+      // Fetch full_name separately so it never blocks role loading
+      try {
+        const { data: nameData, error: nameError } = await supabase
+          .from('users')
+          .select('full_name')
+          .eq('id', authUser.id)
+          .single()
+        if (!nameError && nameData) {
+          setFullName(nameData.full_name ?? null)
+        } else {
+          if (nameError) console.error("Auth Fetch Error (full_name):", nameError)
+          setFullName(null)
+        }
+      } catch (nameErr) {
+        console.error("Auth Fetch Error (full_name):", nameErr)
         setFullName(null)
       }
-    } catch {
-      setRole(null)
-      setIsActive(null)
+    } catch (error) {
+      console.error("Auth Fetch Error:", error)
+      // Try to recover role at least
+      try {
+        const { data: roleData } = await supabase
+          .from('users')
+          .select('role, is_active')
+          .eq('id', authUser.id)
+          .single()
+        setRole(roleData?.role ?? null)
+        setIsActive(roleData?.is_active ?? null)
+      } catch {
+        setRole(null)
+        setIsActive(null)
+      }
       setFullName(null)
     }
   }
