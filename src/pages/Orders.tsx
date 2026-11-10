@@ -348,17 +348,7 @@ export default function Orders() {
     })
   }, [orders, platformFilter, statusFilter, startDate, endDate, searchTerm])
 
-  /** Reset every filter back to its default. */
-  const handleClearFilters = () => {
-    setSearchTerm('')
-    setPlatformFilter('All')
-    setStatusFilter('All')
-    setStartDate('')
-    setEndDate('')
-  }
-
-  /**
-   * Export the currently filtered orders as a CSV file that opens in
+  /** Export the currently filtered orders as a CSV file that opens in
    * Excel. A UTF-8 BOM is included so Excel renders the file correctly.
    */
   const exportCsv = () => {
