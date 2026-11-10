@@ -563,7 +563,7 @@ export default function Inventory() {
                     id="stockLevel"
                     type="number"
                     min="0"
-                    max="9999"
+                    max="500"
                     value={form.stockLevel}
                     onChange={(e) => handleChange('stockLevel', e.target.value)}
                     placeholder="0"
@@ -581,7 +581,7 @@ export default function Inventory() {
                     id="reorderPoint"
                     type="number"
                     min="0"
-                    max="9999"
+                    max="500"
                     value={form.reorderPoint}
                     onChange={(e) =>
                       handleChange('reorderPoint', e.target.value)
