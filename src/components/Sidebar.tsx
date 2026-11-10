@@ -24,7 +24,7 @@ const navItems = [
  * primary navigation links, and the signed-in user's account section.
  */
 export default function Sidebar() {
-  const { user, signOut, role } = useAuth()
+  const { user, signOut, role, fullName } = useAuth()
   const navigate = useNavigate()
 
   const handleSignOut = async () => {
@@ -98,10 +98,21 @@ export default function Sidebar() {
 
       {/* Footer: signed-in user + sign out */}
       <div className="border-t border-slate-800 px-3 py-4">
-        <p className="mb-2 truncate px-3 text-xs text-slate-400">
-          Signed in as{' '}
-          <span className="font-medium text-slate-300">{user?.email}</span>
-        </p>
+        <div className="mb-2 px-3">
+          {fullName ? (
+            <>
+              <p className="truncate text-sm font-semibold text-slate-200">
+                {fullName}
+              </p>
+              <p className="truncate text-xs text-slate-400">{user?.email}</p>
+            </>
+          ) : (
+            <p className="truncate text-xs text-slate-400">
+              Signed in as{' '}
+              <span className="font-medium text-slate-300">{user?.email}</span>
+            </p>
+          )}
+        </div>
         <button
           type="button"
           onClick={handleSignOut}

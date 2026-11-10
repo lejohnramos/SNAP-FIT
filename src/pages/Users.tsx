@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Loader2, RefreshCw } from 'lucide-react'
+import { Loader2, RefreshCw, Save } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 
 interface UserRow {
   id: string
   email: string
+  full_name: string | null
   role: string
   is_active: boolean
 }
@@ -16,18 +17,23 @@ export default function Users() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [updating, setUpdating] = useState<string | null>(null)
+  const [nameDrafts, setNameDrafts] = useState<Record<string, string>>({})
 
   const fetchUsers = useCallback(async () => {
     setLoading(true)
     setError(null)
     const { data, error: fetchError } = await supabase
       .from('users')
-      .select('id, email, role, is_active')
+      .select('id, email, full_name, role, is_active')
       .order('email', { ascending: true })
     if (fetchError) {
       setError(fetchError.message)
     } else {
-      setUsers((data as UserRow[]) ?? [])
+      const rows = (data as UserRow[]) ?? []
+      setUsers(rows)
+      const drafts: Record<string, string> = {}
+      rows.forEach((u) => (drafts[u.id] = u.full_name ?? ''))
+      setNameDrafts(drafts)
     }
     setLoading(false)
   }, [])
@@ -48,6 +54,24 @@ export default function Users() {
     } else {
       setUsers((prev) =>
         prev.map((u) => (u.id === userId ? { ...u, role } : u)),
+      )
+    }
+    setUpdating(null)
+  }
+
+  const updateFullName = async (userId: string) => {
+    if (currentRole !== 'Super Admin') return
+    setUpdating(userId)
+    const fullName = nameDrafts[userId]?.trim() || null
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({ full_name: fullName })
+      .eq('id', userId)
+    if (updateError) {
+      setError(updateError.message)
+    } else {
+      setUsers((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, full_name: fullName } : u)),
       )
     }
     setUpdating(null)
@@ -120,6 +144,8 @@ export default function Users() {
     return ''
   }
 
+  const canEditName = () => currentRole === 'Super Admin'
+
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
@@ -141,7 +167,7 @@ export default function Users() {
 
       {currentRole !== 'Super Admin' && (
         <div className="mb-6 rounded-xl bg-amber-50 px-6 py-4 text-sm text-amber-700 ring-1 ring-amber-200">
-          Only the Super Admin has permission to modify user roles.
+          Only the Super Admin has permission to modify user roles and names.
         </div>
       )}
 
@@ -159,6 +185,9 @@ export default function Users() {
                 Email
               </th>
               <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Full Name
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Role
               </th>
               <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -172,7 +201,7 @@ export default function Users() {
           <tbody className="divide-y divide-slate-100">
             {loading && (
               <tr>
-                <td colSpan={4} className="px-6 py-12 text-center">
+                <td colSpan={5} className="px-6 py-12 text-center">
                   <Loader2 className="mx-auto h-6 w-6 animate-spin text-indigo-600" />
                 </td>
               </tr>
@@ -180,7 +209,7 @@ export default function Users() {
             {!loading && users.length === 0 && (
               <tr>
                 <td
-                  colSpan={4}
+                  colSpan={5}
                   className="px-6 py-12 text-center text-sm text-slate-500"
                 >
                   No users found.
@@ -192,6 +221,34 @@ export default function Users() {
                 <tr key={user.id} className="transition-colors duration-200 hover:bg-slate-50">
                   <td className="px-6 py-4 text-sm text-slate-900">
                     {user.email}
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={nameDrafts[user.id] ?? ''}
+                        onChange={(e) =>
+                          setNameDrafts((prev) => ({
+                            ...prev,
+                            [user.id]: e.target.value,
+                          }))
+                        }
+                        disabled={!canEditName() || updating === user.id}
+                        placeholder="Enter full name"
+                        className="w-48 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                      />
+                      {canEditName() && (
+                        <button
+                          type="button"
+                          onClick={() => void updateFullName(user.id)}
+                          disabled={updating === user.id}
+                          className="rounded-lg border border-slate-300 bg-white p-1.5 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                          title="Save name"
+                        >
+                          <Save className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
                   </td>
                   <td className="px-6 py-4">
                     {canEditRole(user) ? (

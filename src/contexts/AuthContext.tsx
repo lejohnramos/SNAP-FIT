@@ -20,6 +20,7 @@ interface AuthContextValue {
   user: User | null
   role: string | null
   isActive: boolean | null
+  fullName: string | null
   /** True while the initial session is being restored from storage. */
   loading: boolean
   signIn: (email: string, password: string) => Promise<AuthResult>
@@ -44,30 +45,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [role, setRole] = useState<string | null>(null)
   const [isActive, setIsActive] = useState<boolean | null>(null)
+  const [fullName, setFullName] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   const fetchUserProfile = async (authUser: User | null) => {
     if (!authUser) {
       setRole(null)
       setIsActive(null)
+      setFullName(null)
       return
     }
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('role, is_active')
+        .select('role, is_active, full_name')
         .eq('id', authUser.id)
         .single()
       if (!error && data) {
         setRole(data.role ?? null)
         setIsActive(data.is_active ?? null)
+        setFullName(data.full_name ?? null)
       } else {
         setRole(null)
         setIsActive(null)
+        setFullName(null)
       }
     } catch {
       setRole(null)
       setIsActive(null)
+      setFullName(null)
     }
   }
 
@@ -110,10 +116,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut()
     setRole(null)
     setIsActive(null)
+    setFullName(null)
   }
 
   return (
-    <AuthContext.Provider value={{ session, user, role, isActive, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ session, user, role, isActive, fullName, loading, signIn, signUp, signOut }}>
       {children}
     </AuthContext.Provider>
   )
