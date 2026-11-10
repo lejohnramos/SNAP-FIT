@@ -85,11 +85,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setFullName(nameData.full_name ?? null)
         } else {
           if (nameError) console.error("Auth Fetch Error (full_name):", nameError)
-          setFullName(null)
+          setFullName(null) // gracefully fall back (UI will show email)
         }
       } catch (nameErr) {
         console.error("Auth Fetch Error (full_name):", nameErr)
-        setFullName(null)
+        setFullName(null) // gracefully fall back (UI will show email)
       }
     } catch (error) {
       console.error("Auth Fetch Error:", error)

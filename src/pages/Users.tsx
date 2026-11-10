@@ -22,12 +22,21 @@ export default function Users() {
   const fetchUsers = useCallback(async () => {
     setLoading(true)
     setError(null)
-    const { data, error: fetchError } = await supabase
+    let { data, error: fetchError } = await supabase
       .from('users')
       .select('id, email, full_name, role, is_active')
       .order('email', { ascending: true })
     if (fetchError) {
-      setError(fetchError.message)
+      // Fallback if full_name column is unavailable
+      const fallback = await supabase
+        .from('users')
+        .select('id, email, role, is_active')
+        .order('email', { ascending: true })
+      data = (fallback.data as any[] | null)?.map((u) => ({ ...u, full_name: null })) ?? null
+      fetchError = fallback.error
+    }
+    if (fetchError) {
+      console.error('Failed to fetch users:', fetchError)
     } else {
       const rows = (data as UserRow[]) ?? []
       setUsers(rows)
@@ -68,7 +77,7 @@ export default function Users() {
       .update({ full_name: fullName })
       .eq('id', userId)
     if (updateError) {
-      setError(updateError.message)
+      console.error('Failed to update full name:', updateError)
     } else {
       setUsers((prev) =>
         prev.map((u) => (u.id === userId ? { ...u, full_name: fullName } : u)),
@@ -171,11 +180,7 @@ export default function Users() {
         </div>
       )}
 
-      {error && (
-        <div className="mb-6 rounded-xl bg-red-50 px-6 py-4 text-sm text-red-700">
-          {error}
-        </div>
-      )}
+      {/* Raw database errors hidden from UI */}
 
       <div className="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
         <table className="min-w-full divide-y divide-slate-200">
