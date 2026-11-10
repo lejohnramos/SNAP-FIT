@@ -27,6 +27,7 @@ export default function Sidebar() {
   const { user, signOut, role, fullName } = useAuth()
   const navigate = useNavigate()
   console.log("Current User Role:", role)
+  console.log("Sidebar Role Check:", role)
 
   const handleSignOut = async () => {
     await signOut()
@@ -65,7 +66,7 @@ export default function Sidebar() {
             {label}
           </NavLink>
         ))}
-        {(role === 'Admin' || role === 'Super Admin') && (
+        {role === 'Super Admin' && (
           <NavLink
             key="/users"
             to="/users"

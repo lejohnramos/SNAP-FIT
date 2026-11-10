@@ -61,6 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .select('role, is_active, full_name')
         .eq('id', authUser.id)
         .single()
+      console.log("Fetched Profile:", data, error)
       if (!error && data) {
         setRole(data.role ?? null)
         setIsActive(data.is_active ?? null)
