@@ -20,7 +20,7 @@ import { supabase } from '../lib/supabase'
 type Platform = 'Shopee' | 'Lazada' | 'Facebook' | 'Other'
 
 /** Recognized order statuses shown in the app. */
-type OrderStatus = 'Pending' | 'Shipped' | 'Delivered' | 'Completed' | 'Cancelled'
+type OrderStatus = 'Pending' | 'Shipped' | 'Delivered' | 'Completed' | 'Cancelled' | 'Returned' | 'Refunded'
 
 /** Recognized order types: a regular in-stock sale vs a customer pre-order. */
 type OrderType = 'Standard' | 'Pre-order'
@@ -104,6 +104,8 @@ const statusStyles: Record<string, string> = {
   Delivered: 'bg-teal-100 text-teal-700',
   Completed: 'bg-emerald-100 text-emerald-700',
   Cancelled: 'bg-slate-100 text-slate-700',
+  Returned: 'bg-red-100 text-red-700',
+  Refunded: 'bg-purple-100 text-purple-700',
 }
 
 /** Tailwind badge classes per order type (with fallback for unknown values). */
@@ -469,6 +471,13 @@ export default function Orders() {
       ? (selectedProduct.price ?? 0) * previewQuantity
       : null
 
+  const getStatusOptions = (): OrderStatus[] => {
+    if (editingOrder && (editingOrder.status === 'Completed' || editingOrder.status === 'Delivered')) {
+      return ['Returned', 'Refunded']
+    }
+    return ['Pending', 'Shipped', 'Delivered', 'Completed', 'Cancelled']
+  }
+
   /**
    * Submit the modal form. When `editingOrder` is set this performs an
    * UPDATE on the existing row and reconciles stock; otherwise it
@@ -719,13 +728,6 @@ export default function Orders() {
           className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           aria-label="End date"
         />
-        <button
-          type="button"
-          onClick={handleClearFilters}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-50"
-        >
-          Clear
-        </button>
         <span className="text-sm text-slate-500">
           Showing {filteredOrders.length} of {orders.length} orders
         </span>
@@ -1034,7 +1036,7 @@ export default function Orders() {
                   onChange={(e) => handleChange('status', e.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 >
-                  {statuses.map((status) => (
+                  {getStatusOptions().map((status) => (
                     <option key={status} value={status}>
                       {status}
                     </option>
