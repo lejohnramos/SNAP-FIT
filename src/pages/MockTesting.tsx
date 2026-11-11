@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { FlaskConical, Loader2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function MockTesting() {
+  const { user } = useAuth()
   const [loadingShopee, setLoadingShopee] = useState(false)
   const [loadingLazada, setLoadingLazada] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
@@ -87,6 +89,16 @@ export default function MockTesting() {
         showToast('Order created but stock update failed')
         return
       }
+
+      // Log transaction
+      await supabase.from('transactions').insert([
+        {
+          product_id: product.id,
+          user_id: user?.id ?? null,
+          sales: -quantity,
+          reason: 'Order Placed',
+        },
+      ])
 
       showToast(`${platform} order simulated successfully!`)
     } catch (error) {

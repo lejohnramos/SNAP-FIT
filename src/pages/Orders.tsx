@@ -15,6 +15,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../contexts/AuthContext'
 
 /** Recognized sales platforms (mirrors the schema CHECK constraint). */
 type Platform = 'Shopee' | 'Lazada' | 'Facebook' | 'Other'
@@ -146,6 +147,7 @@ const formatPeso = (value: number) =>
  * inventory page always matches.
  */
 export default function Orders() {
+  const { user } = useAuth()
   const [orders, setOrders] = useState<OrderRow[]>([])
   const [products, setProducts] = useState<ProductOption[]>([])
   const [customers, setCustomers] = useState<CustomerOption[]>([])
@@ -559,6 +561,16 @@ export default function Orders() {
 
       // ---- CRUCIAL: ...then subtract the ordered quantity from stock ----
       await persistStock(form.productId, product.stock_level - quantity)
+
+      // Log transaction for the new order
+      await supabase.from('transactions').insert([
+        {
+          product_id: form.productId,
+          user_id: user?.id ?? null,
+          sales: -quantity,
+          reason: 'Order Placed',
+        },
+      ])
 
       // Refresh so the new order appears in its server-sorted position.
       await fetchOrders()
