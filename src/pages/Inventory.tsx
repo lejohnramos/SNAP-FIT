@@ -12,6 +12,8 @@ type ConditionGrade =
   | 'Fair'
   | 'Poor'
 
+type ProductSituation = 'In Stock' | 'On Hold' | 'Damaged' | 'Pre-order'
+
 /**
  * Shape of a row from the Supabase `products` table.
  * Columns are snake_case, mirroring schema.sql exactly.
@@ -27,6 +29,8 @@ interface Product {
   reorder_point: number
   cost: number | null
   price: number | null
+  units_per_box: number | null
+  product_situation: string | null
   created_at: string
 }
 
@@ -41,6 +45,8 @@ interface CollectibleForm {
   price: string
   stockLevel: string
   reorderPoint: string
+  unitsPerBox: string
+  productSituation: ProductSituation
 }
 
 /** Tailwind badge classes per condition grade (with fallback). */
@@ -64,6 +70,8 @@ const emptyForm: CollectibleForm = {
   price: '',
   stockLevel: '',
   reorderPoint: '',
+  unitsPerBox: '1',
+  productSituation: 'In Stock',
 }
 
 /**
@@ -126,6 +134,8 @@ export default function Inventory() {
       price: product.price === null ? '' : String(product.price),
       stockLevel: String(product.stock_level),
       reorderPoint: String(product.reorder_point),
+      unitsPerBox: String(product.units_per_box ?? 1),
+      productSituation: (product.product_situation as ProductSituation) ?? 'In Stock',
     })
     setEditingId(product.id)
     setFormError(null)
@@ -162,6 +172,8 @@ export default function Inventory() {
       reorder_point: Number(form.reorderPoint) || 0,
       cost: form.cost ? Number(form.cost) : null,
       price: form.price ? Number(form.price) : null,
+      units_per_box: Math.max(1, Number(form.unitsPerBox) || 1),
+      product_situation: form.productSituation,
     }
 
     if (editingId) {
@@ -278,6 +290,12 @@ export default function Inventory() {
                 Reorder Point
               </th>
               <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Units/Box
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Situation
+              </th>
+              <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Actions
               </th>
             </tr>
@@ -285,7 +303,7 @@ export default function Inventory() {
           <tbody className="divide-y divide-slate-100">
             {loading && (
               <tr>
-                <td colSpan={7} className="px-6 py-12 text-center">
+                <td colSpan={9} className="px-6 py-12 text-center">
                   <Loader2 className="mx-auto h-6 w-6 animate-spin text-indigo-600" />
                 </td>
               </tr>
@@ -293,7 +311,7 @@ export default function Inventory() {
             {!loading && products.length === 0 && (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={9}
                   className="px-6 py-12 text-center text-sm text-slate-500"
                 >
                   No collectibles yet — add your first one!
@@ -333,6 +351,12 @@ export default function Inventory() {
                     </td>
                     <td className="px-6 py-4 text-right text-sm text-slate-500">
                       {product.reorder_point}
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm text-slate-500">
+                      {product.units_per_box ?? 1}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate-500">
+                      {product.product_situation ?? 'In Stock'}
                     </td>
                     {/* Row actions: edit and delete */}
                     <td className="px-6 py-4 text-right">
@@ -589,6 +613,45 @@ export default function Inventory() {
                     placeholder="0"
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                   />
+                </div>
+              </div>
+
+              {/* Units Per Box & Product Situation */}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label
+                    htmlFor="unitsPerBox"
+                    className="mb-1 block text-sm font-medium text-slate-700"
+                  >
+                    Units Per Box
+                  </label>
+                  <input
+                    id="unitsPerBox"
+                    type="number"
+                    min="1"
+                    value={form.unitsPerBox}
+                    onChange={(e) => handleChange('unitsPerBox', e.target.value)}
+                    placeholder="1"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="productSituation"
+                    className="mb-1 block text-sm font-medium text-slate-700"
+                  >
+                    Product Situation
+                  </label>
+                  <select
+                    id="productSituation"
+                    value={form.productSituation}
+                    onChange={(e) => handleChange('productSituation', e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  >
+                    {(['In Stock', 'On Hold', 'Damaged', 'Pre-order'] as ProductSituation[]).map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
