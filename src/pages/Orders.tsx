@@ -148,6 +148,7 @@ const formatPeso = (value: number) =>
  */
 export default function Orders() {
   const { user } = useAuth()
+  const [activeTab, setActiveTab] = useState<'All Orders' | 'Facebook PMs'>('All Orders')
   const [orders, setOrders] = useState<OrderRow[]>([])
   const [products, setProducts] = useState<ProductOption[]>([])
   const [customers, setCustomers] = useState<CustomerOption[]>([])
@@ -334,6 +335,7 @@ export default function Orders() {
   const filteredOrders = useMemo(() => {
     const term = searchTerm.trim().toLowerCase()
     return orders.filter((order) => {
+      if (activeTab === 'Facebook PMs' && order.platform !== 'Facebook') return false
       if (platformFilter !== 'All' && order.platform !== platformFilter) return false
       if (statusFilter !== 'All' && order.status !== statusFilter) return false
       // Date range (inclusive on both ends, interpreted in local time).
@@ -348,7 +350,7 @@ export default function Orders() {
       }
       return true
     })
-  }, [orders, platformFilter, statusFilter, startDate, endDate, searchTerm])
+  }, [orders, platformFilter, statusFilter, startDate, endDate, searchTerm, activeTab])
 
   /** Export the currently filtered orders as a CSV file that opens in
    * Excel. A UTF-8 BOM is included so Excel renders the file correctly.
@@ -419,7 +421,7 @@ export default function Orders() {
   }
 
   const openModal = () => {
-    setForm(emptyForm)
+    setForm({ ...emptyForm, platform: activeTab === 'Facebook PMs' ? 'Facebook' : 'Shopee' })
     setEditingOrder(null)
     setFormError(null)
     setIsModalOpen(true)
@@ -483,6 +485,10 @@ export default function Orders() {
     // Validate the product and quantity before touching the database.
     if (!form.productId) {
       setFormError('Please select a product.')
+      return
+    }
+    if (activeTab === 'Facebook PMs' && !form.customerId) {
+      setFormError('Customer is required for Facebook PM orders.')
       return
     }
     const quantity = Number(form.quantity)
@@ -673,6 +679,24 @@ export default function Orders() {
               <card.icon className="h-5 w-5" />
             </div>
           </div>
+        ))}
+      </div>
+
+      {/* Tabs */}
+      <div className="mb-4 flex gap-2">
+        {(['All Orders', 'Facebook PMs'] as const).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => setActiveTab(tab)}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              activeTab === tab
+                ? 'bg-indigo-600 text-white'
+                : 'bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            {tab}
+          </button>
         ))}
       </div>
 
@@ -1008,7 +1032,7 @@ export default function Orders() {
                   htmlFor="customer"
                   className="mb-1 block text-sm font-medium text-slate-700"
                 >
-                  Customer <span className="font-normal text-slate-400">(optional)</span>
+                  Customer {activeTab === 'Facebook PMs' ? <span className="text-red-500">*</span> : <span className="font-normal text-slate-400">(optional)</span>}
                 </label>
                 <select
                   id="customer"
