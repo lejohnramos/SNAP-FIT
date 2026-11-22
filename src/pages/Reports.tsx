@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { BarChart3, Calendar, Loader2, RefreshCw, ShoppingBag, TrendingUp } from 'lucide-react'
+import { BarChart3, Loader2, RefreshCw, ShoppingBag, TrendingUp } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 interface OrderRow {
